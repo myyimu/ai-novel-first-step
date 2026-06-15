@@ -8,21 +8,35 @@ on:
       - "apps/**"
       - "services/**"
       - "packages/**"
+      - "docs/**"
+      - ".github/ISSUE_TEMPLATE/**"
       - ".github/workflows/ci.yml"
+      - "CONTRIBUTING.md"
+      - "LICENSE"
       - "one.manifest.json"
       - "package.json"
       - "pnpm-lock.yaml"
       - "pnpm-workspace.yaml"
+      - "README.md"
+      - "README.en.md"
+      - "SECURITY.md"
   push:
     paths:
       - "apps/**"
       - "services/**"
       - "packages/**"
+      - "docs/**"
+      - ".github/ISSUE_TEMPLATE/**"
       - ".github/workflows/ci.yml"
+      - "CONTRIBUTING.md"
+      - "LICENSE"
       - "one.manifest.json"
       - "package.json"
       - "pnpm-lock.yaml"
       - "pnpm-workspace.yaml"
+      - "README.md"
+      - "README.en.md"
+      - "SECURITY.md"
   workflow_dispatch:
 
 jobs:
@@ -31,8 +45,6 @@ jobs:
     steps:
       - uses: actions/checkout@v4
       - uses: pnpm/action-setup@v4
-        with:
-          version: 10
       - uses: actions/setup-node@v4
         with:
           node-version: 20

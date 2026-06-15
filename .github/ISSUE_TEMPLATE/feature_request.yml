@@ -1,0 +1,49 @@
+name: Feature request
+description: Suggest an improvement or product direction
+title: "[Feature]: "
+labels:
+  - enhancement
+body:
+  - type: textarea
+    id: problem
+    attributes:
+      label: Problem
+      description: What writer workflow or product problem should this solve?
+      placeholder: New writers cannot tell...
+    validations:
+      required: true
+  - type: textarea
+    id: proposal
+    attributes:
+      label: Proposed solution
+      description: What should the tool do?
+    validations:
+      required: true
+  - type: dropdown
+    id: area
+    attributes:
+      label: Area
+      options:
+        - Reference chapter critique
+        - User chapter scoring
+        - Platform / audience fit
+        - TXT upload / chapter splitting
+        - Async job / resume
+        - Whole-book analysis
+        - Export center
+        - Originalization risk
+        - Model provider
+        - Documentation
+        - Other
+    validations:
+      required: true
+  - type: textarea
+    id: examples
+    attributes:
+      label: Examples or references
+      description: Use short excerpts or abstract descriptions only. Do not paste copyrighted full text.
+  - type: textarea
+    id: risks
+    attributes:
+      label: Risks or constraints
+      description: Any privacy, copyright, API cost, UX, or implementation constraints?

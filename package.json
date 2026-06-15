@@ -3,6 +3,16 @@
   "private": true,
   "version": "0.0.0",
   "description": "AI小说第一步：本地部署的 AI 小说拆解与质检工具，先拆热榜样本，再生成写作标准，最后质检自己的章节。",
+  "license": "MIT",
+  "author": "myyimu <xiaoke5211@gmail.com>",
+  "homepage": "https://github.com/myyimu/ai-novel-first-step#readme",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/myyimu/ai-novel-first-step.git"
+  },
+  "bugs": {
+    "url": "https://github.com/myyimu/ai-novel-first-step/issues"
+  },
   "keywords": [
     "ai-novel",
     "webnovel",
@@ -20,6 +30,10 @@
     "dev:web": "one dev -p web",
     "dev:api": "one dev -p api",
     "dev:core": "one dev -p ai-core",
+    "dev:raw": "pnpm --parallel --filter web --filter api --filter @ai-novel-first-step/ai-core --if-present run dev",
+    "dev:web:raw": "pnpm --filter web dev",
+    "dev:api:raw": "pnpm --filter api dev",
+    "dev:core:raw": "pnpm --filter @ai-novel-first-step/ai-core dev",
     "build": "pnpm -r --if-present build",
     "lint": "pnpm -r --if-present lint",
     "format": "pnpm -r --if-present format",

@@ -3,9 +3,10 @@
   "version": "0.1.0",
   "private": true,
   "description": "Local API for 新手AI小说第一步.",
-  "license": "UNLICENSED",
+  "license": "MIT",
   "author": "",
   "scripts": {
+    "dev": "nest start --watch",
     "build": "nest build",
     "start": "nest start",
     "start:dev": "nest start --watch",
