@@ -16,20 +16,46 @@ export class ProviderConfigDto {
   @ApiPropertyOptional({
     description:
       "Provider preset used to prefill base URL and model. User-owned key is still sent per request only.",
-    enum: ["custom", "deepseek", "doubao", "qwen", "ollama"],
+    enum: [
+      "custom",
+      "ai-horde",
+      "openrouter-free",
+      "shared-gpu",
+      "deepseek",
+      "doubao",
+      "qwen",
+      "ollama",
+    ],
     example: "deepseek",
   })
   @IsOptional()
-  @IsIn(["custom", "deepseek", "doubao", "qwen", "ollama"])
-  preset?: "custom" | "deepseek" | "doubao" | "qwen" | "ollama";
+  @IsIn([
+    "custom",
+    "ai-horde",
+    "openrouter-free",
+    "shared-gpu",
+    "deepseek",
+    "doubao",
+    "qwen",
+    "ollama",
+  ])
+  preset?:
+    | "custom"
+    | "ai-horde"
+    | "openrouter-free"
+    | "shared-gpu"
+    | "deepseek"
+    | "doubao"
+    | "qwen"
+    | "ollama";
 
   @ApiProperty({
     description: "Provider adapter used by the local API.",
-    enum: ["mock", "openai-compatible"],
+    enum: ["mock", "openai-compatible", "ai-horde"],
     example: "openai-compatible",
   })
-  @IsIn(["mock", "openai-compatible"])
-  kind!: "mock" | "openai-compatible";
+  @IsIn(["mock", "openai-compatible", "ai-horde"])
+  kind!: "mock" | "openai-compatible" | "ai-horde";
 
   @ApiPropertyOptional({
     description:

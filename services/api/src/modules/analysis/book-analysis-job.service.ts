@@ -4,7 +4,7 @@ import {
   NotFoundException,
   type OnModuleInit,
 } from "@nestjs/common";
-import { mkdir, writeFile } from "node:fs/promises";
+import { mkdir, readdir, readFile, writeFile } from "node:fs/promises";
 import { join } from "node:path";
 import { AnalysisPersistenceRepository } from "./analysis-persistence.repository";
 import { BookPreprocessResult } from "./text-preprocessor.service";
@@ -54,6 +54,7 @@ export interface BookAnalysisJobSnapshot {
   partialResult?: BookAnalysisPartialResult;
   result?: unknown;
   error?: string;
+  uploadId?: string;
 }
 
 interface StoredBookAnalysisJob extends BookAnalysisJobSnapshot {}
@@ -65,6 +66,9 @@ export class BookAnalysisJobService implements OnModuleInit {
   private readonly storageRoot =
     process.env.ANALYSIS_STORAGE_DIR?.trim() ||
     join(process.cwd(), ".local", "analysis");
+  private readonly artifactRoot =
+    process.env.ANALYSIS_ARTIFACT_DIR?.trim() ||
+    join(process.cwd(), ".local", "artifacts");
 
   constructor(private readonly repository: AnalysisPersistenceRepository) {}
 
@@ -94,6 +98,7 @@ export class BookAnalysisJobService implements OnModuleInit {
         total: 1,
         message: "任务已进入本地内存队列。",
       },
+      uploadId,
     };
 
     this.jobs.set(id, job);
@@ -119,6 +124,53 @@ export class BookAnalysisJobService implements OnModuleInit {
     }
 
     return persisted;
+  }
+
+  async resume(
+    jobId: string,
+    processor: (jobId: string) => Promise<unknown>,
+  ): Promise<BookAnalysisJobSnapshot> {
+    let job = this.jobs.get(jobId);
+    if (!job) {
+      const persisted = await this.repository.getJob(jobId);
+      if (!persisted) {
+        throw new NotFoundException(`Book analysis job not found: ${jobId}`);
+      }
+      job = { ...persisted };
+      this.jobs.set(jobId, job);
+    }
+
+    if (job.status === "running" || job.status === "queued") {
+      return this.snapshot(job);
+    }
+
+    const now = new Date().toISOString();
+    job.status = "queued";
+    job.error = undefined;
+    job.finishedAt = undefined;
+    job.updatedAt = now;
+    job.progress = {
+      stage: "queued",
+      current: job.partialResult?.mapCount ?? 0,
+      total: job.partialResult?.totalChapters ?? 1,
+      message: job.partialResult
+        ? `已找到 ${job.partialResult.mapCount}/${job.partialResult.totalChapters} 个已完成章节，准备继续。`
+        : "任务已重新进入本地内存队列。",
+    };
+    await this.repository.updateJob(jobId, {
+      status: job.status,
+      progress: job.progress,
+      error: null,
+      finishedAt: null,
+    });
+
+    setTimeout(() => {
+      void processor(jobId).catch((error: unknown) => {
+        void this.fail(jobId, error);
+      });
+    }, 0);
+
+    return this.snapshot(job);
   }
 
   async markRunning(jobId: string) {
@@ -163,10 +215,11 @@ export class BookAnalysisJobService implements OnModuleInit {
   }) {
     const job = this.read(input.jobId);
     const mapCount = input.chapterMaps.length;
-    const artifactDir = join(this.storageRoot, "jobs", input.jobId, "maps");
+    const artifactDir = join(this.artifactRoot, input.jobId);
+    const mapId = this.chapterMapFileId(input.chapterMap, mapCount);
     await mkdir(artifactDir, { recursive: true });
     await writeFile(
-      join(artifactDir, `${String(mapCount).padStart(4, "0")}.json`),
+      join(artifactDir, `map-${mapId}.json`),
       JSON.stringify(input.chapterMap, null, 2),
       "utf8",
     );
@@ -181,13 +234,46 @@ export class BookAnalysisJobService implements OnModuleInit {
       totalChapters: input.totalChapters,
       artifactDir,
       chapterMaps: input.chapterMaps,
-      notice:
-        "这是整书拆解的中间结果。任务失败时可用于查看已完成章节，后续可扩展为断点续跑或半成品导出。",
+      notice: `已完成 ${mapCount}/${input.totalChapters} 个章节片段；如果任务失败，可从第 ${Math.min(
+        mapCount + 1,
+        input.totalChapters,
+      )} 章继续。`,
     };
     job.updatedAt = now;
     await this.repository.updateJob(input.jobId, {
       partialResult: job.partialResult,
     });
+  }
+
+  async readChapterMaps<T = unknown>(jobId: string): Promise<T[]> {
+    const artifactDirs = [
+      join(this.artifactRoot, jobId),
+      join(this.storageRoot, "jobs", jobId, "maps"),
+    ];
+    for (const artifactDir of artifactDirs) {
+      let files: string[];
+      try {
+        files = await readdir(artifactDir);
+      } catch {
+        continue;
+      }
+
+      const jsonFiles = files
+        .filter((file) => file.toLowerCase().endsWith(".json"))
+        .sort((left, right) => left.localeCompare(right));
+      if (!jsonFiles.length) {
+        continue;
+      }
+
+      const maps: T[] = [];
+      for (const file of jsonFiles) {
+        const content = await readFile(join(artifactDir, file), "utf8");
+        maps.push(JSON.parse(content) as T);
+      }
+      return maps;
+    }
+
+    return [];
   }
 
   async complete(jobId: string, result: unknown) {
@@ -256,5 +342,17 @@ export class BookAnalysisJobService implements OnModuleInit {
       progress: { ...job.progress },
       inputSummary: { ...job.inputSummary },
     };
+  }
+
+  private chapterMapFileId(chapterMap: unknown, fallbackOrder: number) {
+    const source = chapterMap as { chapterId?: unknown; order?: unknown };
+    const rawId =
+      typeof source?.chapterId === "string" && source.chapterId.trim()
+        ? source.chapterId
+        : typeof source?.order === "number"
+          ? `ch-${String(source.order).padStart(4, "0")}`
+          : `ch-${String(fallbackOrder).padStart(4, "0")}`;
+
+    return rawId.replace(/[^a-zA-Z0-9._-]/g, "-");
   }
 }

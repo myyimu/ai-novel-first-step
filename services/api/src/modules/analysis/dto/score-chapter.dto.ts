@@ -2,6 +2,7 @@ import { ApiProperty } from "@nestjs/swagger";
 import { Type } from "class-transformer";
 import {
   IsArray,
+  IsBoolean,
   IsIn,
   IsInt,
   IsNotEmpty,
@@ -16,6 +17,7 @@ import {
   ValidateNested,
 } from "class-validator";
 import { ProviderConfigDto } from "./provider-config.dto";
+import { PlatformStrategyDto } from "./platform-strategy.dto";
 
 export class PerformanceSnapshotDto {
   @ApiProperty({
@@ -40,6 +42,18 @@ export class PerformanceSnapshotDto {
   @Min(0)
   @Max(100)
   clickThroughRate?: number;
+
+  @ApiProperty({
+    description: "Platform-defined valid read rate, percentage 0-100.",
+    required: false,
+    example: 52,
+  })
+  @IsOptional()
+  @Type(() => Number)
+  @IsNumber()
+  @Min(0)
+  @Max(100)
+  validReadRate?: number;
 
   @ApiProperty({
     description: "How many readers reached the bottom, percentage 0-100.",
@@ -88,9 +102,132 @@ export class PerformanceSnapshotDto {
   @Min(0)
   @Max(100)
   followRate?: number;
+
+  @ApiProperty({
+    description: "Bookshelf/add-to-library rate, percentage 0-100.",
+    required: false,
+    example: 18,
+  })
+  @IsOptional()
+  @Type(() => Number)
+  @IsNumber()
+  @Min(0)
+  @Max(100)
+  bookshelfRate?: number;
+
+  @ApiProperty({
+    description: "First chapter completion rate, percentage 0-100.",
+    required: false,
+    example: 46,
+  })
+  @IsOptional()
+  @Type(() => Number)
+  @IsNumber()
+  @Min(0)
+  @Max(100)
+  firstChapterCompletionRate?: number;
+
+  @ApiProperty({
+    description:
+      "Average read progress for short-form paid content, percentage 0-100.",
+    required: false,
+    example: 64,
+  })
+  @IsOptional()
+  @Type(() => Number)
+  @IsNumber()
+  @Min(0)
+  @Max(100)
+  avgReadProgressRate?: number;
+
+  @ApiProperty({
+    description: "Paid unlock/payment conversion rate, percentage 0-100.",
+    required: false,
+    example: 8,
+  })
+  @IsOptional()
+  @Type(() => Number)
+  @IsNumber()
+  @Min(0)
+  @Max(100)
+  paidUnlockRate?: number;
+
+  @ApiProperty({
+    description:
+      "Readers clicking from chapter end to next chapter, percentage 0-100.",
+    required: false,
+    example: 33,
+  })
+  @IsOptional()
+  @Type(() => Number)
+  @IsNumber()
+  @Min(0)
+  @Max(100)
+  nextChapterClickRate?: number;
+
+  @ApiProperty({
+    description: "Retention through the first 3 chapters, percentage 0-100.",
+    required: false,
+    example: 24,
+  })
+  @IsOptional()
+  @Type(() => Number)
+  @IsNumber()
+  @Min(0)
+  @Max(100)
+  threeChapterRetentionRate?: number;
 }
 
-export class ScoreChapterDto {
+export class AiSelfTestOptionsDto {
+  @ApiProperty({
+    description:
+      "Whether the model should run auxiliary common-reader self-tests.",
+    required: false,
+    example: true,
+  })
+  @IsOptional()
+  @IsBoolean()
+  enabled?: boolean;
+
+  @ApiProperty({
+    description:
+      "AI-run self-tests used to improve scoring and the revision prompt.",
+    required: false,
+    enum: [
+      "dialogue-mask",
+      "jump-read",
+      "emotion",
+      "setting-recap",
+      "delete-sentence",
+      "ai-trace",
+    ],
+    isArray: true,
+    example: [
+      "dialogue-mask",
+      "jump-read",
+      "emotion",
+      "setting-recap",
+      "delete-sentence",
+      "ai-trace",
+    ],
+  })
+  @IsOptional()
+  @IsArray()
+  @IsIn(
+    [
+      "dialogue-mask",
+      "jump-read",
+      "emotion",
+      "setting-recap",
+      "delete-sentence",
+      "ai-trace",
+    ],
+    { each: true },
+  )
+  tests?: string[];
+}
+
+export class ScoreChapterDto extends PlatformStrategyDto {
   @ApiProperty({ type: ProviderConfigDto })
   @ValidateNested()
   @Type(() => ProviderConfigDto)
@@ -221,4 +358,15 @@ export class ScoreChapterDto {
   @ValidateNested()
   @Type(() => PerformanceSnapshotDto)
   performanceSnapshot?: PerformanceSnapshotDto;
+
+  @ApiProperty({
+    description:
+      "Optional AI-run common-reader self-tests. Users do not provide answers; the model performs these checks from chapter text.",
+    required: false,
+    type: AiSelfTestOptionsDto,
+  })
+  @IsOptional()
+  @ValidateNested()
+  @Type(() => AiSelfTestOptionsDto)
+  aiSelfTest?: AiSelfTestOptionsDto;
 }

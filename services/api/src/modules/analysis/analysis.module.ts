@@ -6,6 +6,7 @@ import { BookAnalysisJobService } from "./book-analysis-job.service";
 import { BookExportService } from "./book-export.service";
 import { BookUploadService } from "./book-upload.service";
 import { ModelProviderService } from "./model-provider.service";
+import { ResearchLibraryService } from "./research-library.service";
 import { TextPreprocessorService } from "./text-preprocessor.service";
 
 @Module({
@@ -17,6 +18,7 @@ import { TextPreprocessorService } from "./text-preprocessor.service";
     BookExportService,
     BookUploadService,
     ModelProviderService,
+    ResearchLibraryService,
     TextPreprocessorService,
   ],
 })

@@ -56,9 +56,12 @@
 
 ## 支持的模型接入
 
-默认采用用户自带 Key，不持久化保存 API Key。
+默认提供公共免费模型入口，也支持用户自带 Key；用户填写的 API Key 不持久化保存。
 
 - mock：本地演示和自动化验证。
+- AI Horde 公共模型池：默认入口，匿名低优先级队列，不需要用户填写 Key。
+- OpenRouter 免费模型：服务端配置 OpenRouter Key，默认使用 `openrouter/free`，前端不要求用户填写 Key。
+- 免费共享算力：由服务端配置 OpenAI-compatible 共享线路，前端不要求用户填写 Key。
 - DeepSeek。
 - 豆包 / 火山方舟。
 - 阿里云百炼 / 通义千问。
@@ -90,6 +93,28 @@ pnpm run dev:raw
 
 这会并行启动 `web`、`api` 和 `ai-core`，不依赖 `one` 命令。
 
+Windows 本地一键启动：
+
+```powershell
+pnpm run start:local
+```
+
+也可以直接双击：
+
+```text
+scripts/start-local.cmd
+```
+
+这个脚本会打开两个 PowerShell 窗口，分别启动 `api` 和 `web`，并自动设置：
+
+```text
+Web: http://127.0.0.1:3000
+API: http://127.0.0.1:3001/api/v1
+NEXT_PUBLIC_API_BASE_URL=http://127.0.0.1:3001/api/v1
+```
+
+关闭打开的 API / Web PowerShell 窗口即可停止服务。
+
 单独启动某个项目，One CLI 版本：
 
 ```bash
@@ -109,8 +134,8 @@ pnpm run dev:core:raw
 默认本地地址：
 
 ```text
-Web: http://localhost:3001
-API: http://localhost:3000/api/v1
+Web: http://127.0.0.1:3000
+API: http://127.0.0.1:3001/api/v1
 ```
 
 ## Workspace
@@ -123,16 +148,43 @@ API: http://localhost:3000/api/v1
 
 默认不配置 `DATABASE_URL` 时，API 会使用 `.local/pglite` 作为本地开发数据库。
 
+默认的 AI Horde 公共模型池不需要配置 Key；如果要提升 Horde 排队优先级，可以在 API 服务环境变量中配置：
+
+```text
+AI_HORDE_API_KEY=your-horde-key
+AI_HORDE_MODEL=aphrodite/TheDrummer/Cydonia-24B-v4.3
+```
+
+如果要启用“OpenRouter 免费模型”入口，需要在 API 服务环境变量中配置：
+
+```text
+OPENROUTER_API_KEY=sk-or-v1-...
+OPENROUTER_FREE_MODEL=openrouter/free
+OPENROUTER_HTTP_REFERER=http://localhost:3001
+OPENROUTER_APP_TITLE=AI小说第一步
+```
+
+如果要换成其他 OpenAI-compatible 免费/共享推理线路，可以配置通用共享算力入口：
+
+```text
+SHARED_GPU_BASE_URL=https://your-shared-gpu.example.com/v1
+SHARED_GPU_MODEL=your-model-id
+SHARED_GPU_API_KEY=optional-backend-only-key
+```
+
+免费线路适合降低首次使用门槛，但可能排队、限流、超时、质量波动或不适合敏感文本；建议上线时配合限流和日志审计。
+
 上传文本和整书拆解中间结果默认保存在：
 
 ```text
 .local/analysis
+.local/artifacts
 ```
 
 其中整书任务的章节 map 会写入：
 
 ```text
-.local/analysis/jobs/{jobId}/maps/
+.local/artifacts/{jobId}/map-{chapterId}.json
 ```
 
 `.local` 已被 `.gitignore` 忽略，不应提交上传文本、模型输出、本地数据库或 API Key。

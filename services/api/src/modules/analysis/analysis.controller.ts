@@ -26,17 +26,24 @@ import {
   type BookExportMode,
 } from "./book-export.service";
 import { AnalyzeBookDto } from "./dto/analyze-book.dto";
+import { AskResearchLibraryDto } from "./dto/ask-research-library.dto";
 import { BuildRubricDto } from "./dto/build-rubric.dto";
+import { CompareResearchBooksDto } from "./dto/compare-research-books.dto";
 import { CreateBookJobFromUploadDto } from "./dto/create-book-job-from-upload.dto";
+import { InferReferenceProfileDto } from "./dto/infer-reference-profile.dto";
 import { PreprocessBookDto } from "./dto/preprocess-book.dto";
 import { PreviewAnalysisDto } from "./dto/preview-analysis.dto";
 import { ScoreChapterDto } from "./dto/score-chapter.dto";
 import { TestProviderDto } from "./dto/provider-config.dto";
+import { ResearchLibraryService } from "./research-library.service";
 
 @ApiTags("analysis")
 @Controller("analysis")
 export class AnalysisController {
-  constructor(private readonly analysisService: AnalysisService) {}
+  constructor(
+    private readonly analysisService: AnalysisService,
+    private readonly researchLibrary: ResearchLibraryService,
+  ) {}
 
   @Get("pipeline")
   @Public()
@@ -69,6 +76,27 @@ export class AnalysisController {
   @ApiOperation({ summary: "List provider presets for BYOK model setup" })
   getProviderPresets() {
     return this.analysisService.getProviderPresets();
+  }
+
+  @Get("provider/horde-models")
+  @Public()
+  @ApiOperation({ summary: "List currently available AI Horde text models" })
+  getHordeTextModels() {
+    return this.analysisService.getHordeTextModels();
+  }
+
+  @Post("reference/profile")
+  @HttpCode(200)
+  @Public()
+  @ApiOperation({
+    summary: "Infer market positioning from a reference chapter",
+  })
+  @ApiResponse({
+    status: 200,
+    description: "AI inferred chapter title, genre and market profile",
+  })
+  inferReferenceProfile(@Body() body: InferReferenceProfileDto) {
+    return this.analysisService.inferReferenceProfile(body);
   }
 
   @Post("rubric")
@@ -122,6 +150,22 @@ export class AnalysisController {
   @ApiOperation({ summary: "Create an async book map-reduce analysis job" })
   createBookAnalysisJob(@Body() body: AnalyzeBookDto) {
     return this.analysisService.createBookAnalysisJob(body);
+  }
+
+  @Post("book/jobs/:jobId/resume")
+  @HttpCode(202)
+  @Public()
+  @ApiOperation({
+    summary: "Resume a failed async book analysis job from saved chapter maps",
+  })
+  resumeBookAnalysisJob(
+    @Param("jobId") jobId: string,
+    @Body() body: CreateBookJobFromUploadDto,
+  ) {
+    return this.analysisService.resumeBookAnalysisJob({
+      jobId,
+      provider: body.provider,
+    });
   }
 
   @Get("book/jobs/:jobId")
@@ -212,6 +256,37 @@ export class AnalysisController {
     return this.analysisService.listBookUploads(
       limit ? Number(limit) : undefined,
     );
+  }
+
+  @Get("research/library")
+  @Public()
+  @ApiOperation({
+    summary: "Read persisted research-library assets derived from book jobs",
+  })
+  getResearchLibrary(@Query("limit") limit?: string) {
+    return this.researchLibrary.getLibrary(limit ? Number(limit) : undefined);
+  }
+
+  @Post("research/compare")
+  @HttpCode(200)
+  @Public()
+  @ApiOperation({
+    summary: "Compare multiple succeeded book-analysis jobs",
+  })
+  compareResearchBooks(
+    @Body() body: CompareResearchBooksDto,
+  ): Promise<unknown> {
+    return this.researchLibrary.compareBooks(body);
+  }
+
+  @Post("research/ask")
+  @HttpCode(200)
+  @Public()
+  @ApiOperation({
+    summary: "Answer a question from persisted research-library assets",
+  })
+  askResearchLibrary(@Body() body: AskResearchLibraryDto): Promise<unknown> {
+    return this.researchLibrary.answerQuestion(body);
   }
 
   @Post("book/uploads/:uploadId/jobs")

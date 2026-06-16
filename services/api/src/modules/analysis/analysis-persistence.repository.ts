@@ -220,6 +220,7 @@ export class AnalysisPersistenceRepository {
         row.partialResult as BookAnalysisJobSnapshot["partialResult"],
       result: row.result,
       error: row.error ?? undefined,
+      uploadId: row.uploadId ?? undefined,
     };
   }
 }

@@ -34,6 +34,7 @@
     "dev:web:raw": "pnpm --filter web dev",
     "dev:api:raw": "pnpm --filter api dev",
     "dev:core:raw": "pnpm --filter @ai-novel-first-step/ai-core dev",
+    "start:local": "powershell -NoProfile -ExecutionPolicy Bypass -File ./scripts/start-local.ps1",
     "build": "pnpm -r --if-present build",
     "lint": "pnpm -r --if-present lint",
     "format": "pnpm -r --if-present format",

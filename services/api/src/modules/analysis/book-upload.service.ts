@@ -5,12 +5,13 @@ import {
 } from "@nestjs/common";
 import { randomUUID } from "node:crypto";
 import { mkdir, readFile, writeFile } from "node:fs/promises";
-import { basename, join } from "node:path";
+import { join } from "node:path";
 import {
   AnalysisPersistenceRepository,
   type AnalysisUploadSnapshot,
 } from "./analysis-persistence.repository";
 import { TextPreprocessorService } from "./text-preprocessor.service";
+import { normalizeUploadFilename } from "./upload-filename";
 
 export interface UploadedTxtFile {
   originalname?: string;
@@ -43,7 +44,7 @@ export class BookUploadService {
       throw new BadRequestException("TXT file is required.");
     }
 
-    const originalFilename = basename(input.file.originalname || "novel.txt");
+    const originalFilename = normalizeUploadFilename(input.file.originalname);
     if (!originalFilename.toLowerCase().endsWith(".txt")) {
       throw new BadRequestException("Only .txt files are supported.");
     }

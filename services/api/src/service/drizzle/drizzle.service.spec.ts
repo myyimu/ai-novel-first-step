@@ -1,7 +1,12 @@
 import { DrizzleService } from "./drizzle.service";
+import { mkdtempSync, rmSync } from "node:fs";
+import { join } from "node:path";
+import { tmpdir } from "node:os";
 
 describe("DrizzleService", () => {
   const originalUrl = process.env.DATABASE_URL;
+  const originalPgliteDataDir = process.env.PGLITE_DATA_DIR;
+  let tempPgliteDataDir: string | undefined;
 
   afterEach(() => {
     if (originalUrl === undefined) {
@@ -9,11 +14,22 @@ describe("DrizzleService", () => {
     } else {
       process.env.DATABASE_URL = originalUrl;
     }
+    if (originalPgliteDataDir === undefined) {
+      delete process.env.PGLITE_DATA_DIR;
+    } else {
+      process.env.PGLITE_DATA_DIR = originalPgliteDataDir;
+    }
+    if (tempPgliteDataDir) {
+      rmSync(tempPgliteDataDir, { recursive: true, force: true });
+      tempPgliteDataDir = undefined;
+    }
   });
 
   describe("when DATABASE_URL is empty (PGlite fallback)", () => {
     beforeEach(() => {
       delete process.env.DATABASE_URL;
+      tempPgliteDataDir = mkdtempSync(join(tmpdir(), "ai-novel-pglite-"));
+      process.env.PGLITE_DATA_DIR = tempPgliteDataDir;
     });
 
     it("constructs without throwing and exposes a usable db handle", async () => {
@@ -60,6 +76,8 @@ describe("DrizzleService", () => {
   describe("when DATABASE_URL is whitespace", () => {
     beforeEach(() => {
       process.env.DATABASE_URL = "   ";
+      tempPgliteDataDir = mkdtempSync(join(tmpdir(), "ai-novel-pglite-"));
+      process.env.PGLITE_DATA_DIR = tempPgliteDataDir;
     });
 
     it("is treated as empty and falls back to PGlite", async () => {

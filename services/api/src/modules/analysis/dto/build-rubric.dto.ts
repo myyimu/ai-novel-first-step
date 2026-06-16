@@ -11,8 +11,9 @@ import {
   ValidateNested,
 } from "class-validator";
 import { ProviderConfigDto } from "./provider-config.dto";
+import { PlatformStrategyDto } from "./platform-strategy.dto";
 
-export class BuildRubricDto {
+export class BuildRubricDto extends PlatformStrategyDto {
   @ApiProperty({ type: ProviderConfigDto })
   @ValidateNested()
   @Type(() => ProviderConfigDto)

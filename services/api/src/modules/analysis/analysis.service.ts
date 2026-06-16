@@ -14,6 +14,7 @@ import {
   ChapterSegment,
   TextPreprocessorService,
 } from "./text-preprocessor.service";
+import { InferReferenceProfileDto } from "./dto/infer-reference-profile.dto";
 import { AnalysisPersistenceRepository } from "./analysis-persistence.repository";
 import {
   BookExportService,
@@ -21,6 +22,7 @@ import {
   type BookExportMode,
 } from "./book-export.service";
 import { BookUploadService, type UploadedTxtFile } from "./book-upload.service";
+import { extractJson } from "./json-extract";
 import { ModelProviderService } from "./model-provider.service";
 
 const metrics = [
@@ -332,7 +334,7 @@ export class AnalysisService {
         "critic_pass",
         "generate_revision_plan",
       ],
-      providerModes: ["mock", "openai-compatible"],
+      providerModes: ["mock", "openai-compatible", "ai-horde"],
       providerPresets: this.modelProviders.getPresets(),
       storagePolicy:
         "local-first; user text stays in the deployment; API keys are not persisted; async jobs persist status, preprocessing, and chapter map partial results locally",
@@ -347,22 +349,54 @@ export class AnalysisService {
     return this.modelProviders.getPresets();
   }
 
+  async getHordeTextModels() {
+    return this.modelProviders.getHordeTextModels();
+  }
+
+  async inferReferenceProfile(input: InferReferenceProfileDto) {
+    if (input.provider.kind === "mock") {
+      return this.mockReferenceProfile(input);
+    }
+
+    const content = await this.modelProviders.chat(
+      input.provider,
+      [
+        {
+          role: "system",
+          content:
+            "你是资深中文网文市场编辑。你只返回合法 JSON，不使用 Markdown，不解释过程。",
+        },
+        {
+          role: "user",
+          content: this.inferReferenceProfilePrompt(input),
+        },
+      ],
+      { maxOutputTokens: 1400 },
+    );
+
+    return this.parseJson(content);
+  }
+
   async buildRubric(input: BuildRubricDto) {
     if (input.provider.kind === "mock") {
       return this.mockRubric(input);
     }
 
-    const content = await this.modelProviders.chat(input.provider, [
-      {
-        role: "system",
-        content:
-          "你是资深中文网文编辑和拆书教练。你只返回合法 JSON，不使用 Markdown。",
-      },
-      {
-        role: "user",
-        content: this.buildRubricPrompt(input),
-      },
-    ]);
+    const content = await this.modelProviders.chat(
+      input.provider,
+      [
+        {
+          role: "system",
+          content:
+            "你是资深中文网文编辑和拆书教练。你只返回合法 JSON，不使用 Markdown。",
+        },
+        {
+          role: "user",
+          content: this.buildRubricPrompt(input),
+        },
+      ],
+      { maxOutputTokens: 2600 },
+    );
 
     return this.parseJson(content);
   }
@@ -372,17 +406,21 @@ export class AnalysisService {
       return this.mockScore(input);
     }
 
-    const content = await this.modelProviders.chat(input.provider, [
-      {
-        role: "system",
-        content:
-          "你是严谨的中文网文点评官。你只返回合法 JSON，所有评分必须给出具体证据和可执行改法。",
-      },
-      {
-        role: "user",
-        content: this.scoreChapterPrompt(input),
-      },
-    ]);
+    const content = await this.modelProviders.chat(
+      input.provider,
+      [
+        {
+          role: "system",
+          content:
+            "你是严谨的中文网文点评官。你只返回合法 JSON，所有评分必须给出具体证据和可执行改法。",
+        },
+        {
+          role: "user",
+          content: this.scoreChapterPrompt(input),
+        },
+      ],
+      { maxOutputTokens: 3072 },
+    );
 
     return this.parseJson(content);
   }
@@ -429,6 +467,51 @@ export class AnalysisService {
 
   getBookAnalysisJob(jobId: string) {
     return this.bookJobs.get(jobId);
+  }
+
+  async resumeBookAnalysisJob(input: {
+    jobId: string;
+    provider: ProviderConfigDto;
+  }) {
+    const job = await this.bookJobs.get(input.jobId);
+    if (!job.uploadId) {
+      throw new BadRequestException(
+        "Only jobs created from uploaded TXT files can be resumed.",
+      );
+    }
+
+    const upload = await this.bookUploads.getUpload(job.uploadId);
+    const text = await this.bookUploads.readNormalizedText(job.uploadId);
+    const analysisInput: AnalyzeBookDto = {
+      provider: input.provider,
+      title: upload.title,
+      genre: upload.genre,
+      text,
+    };
+
+    return this.bookJobs.resume(input.jobId, async (jobId) => {
+      await this.bookJobs.markRunning(jobId);
+      const result = await this.runBookMapReduce(
+        analysisInput,
+        async (progress) => {
+          await this.bookJobs.updateProgress(jobId, progress);
+        },
+        async (preprocessing) => {
+          await this.bookJobs.setPreprocessing(jobId, preprocessing);
+        },
+        async (chapterMap, chapterMaps, totalChapters) => {
+          await this.bookJobs.recordChapterMap({
+            jobId,
+            chapterMap,
+            chapterMaps,
+            totalChapters,
+          });
+        },
+        { jobId },
+      );
+      await this.bookJobs.complete(jobId, result);
+      return result;
+    });
   }
 
   async uploadBookFile(input: {
@@ -515,25 +598,7 @@ export class AnalysisService {
   }
 
   private parseJson(content: string) {
-    const trimmed = content.trim();
-    const withoutFence = trimmed
-      .replace(/^```json\s*/i, "")
-      .replace(/^```\s*/i, "")
-      .replace(/\s*```$/i, "");
-    const start = withoutFence.indexOf("{");
-    const end = withoutFence.lastIndexOf("}");
-
-    if (start === -1 || end === -1 || end <= start) {
-      throw new BadRequestException("Provider response was not JSON.");
-    }
-
-    try {
-      return JSON.parse(withoutFence.slice(start, end + 1));
-    } catch (error) {
-      throw new BadRequestException(
-        `Provider response JSON parse failed: ${(error as Error).message}`,
-      );
-    }
+    return extractJson(content);
   }
 
   private async runBookMapReduce(
@@ -547,6 +612,7 @@ export class AnalysisService {
       chapterMaps: ChapterMapResult[],
       totalChapters: number,
     ) => void | Promise<void>,
+    options: { jobId?: string } = {},
   ) {
     await onProgress?.({
       stage: "preprocess",
@@ -566,8 +632,21 @@ export class AnalysisService {
       message: `已切分 ${chapters.length} 个章节片段，开始逐章拆解。`,
     });
 
-    const chapterMaps: ChapterMapResult[] = [];
-    for (const chapter of chapters) {
+    const chapterMaps: ChapterMapResult[] = options.jobId
+      ? (
+          await this.bookJobs.readChapterMaps<ChapterMapResult>(options.jobId)
+        ).slice(0, chapters.length)
+      : [];
+    if (chapterMaps.length) {
+      await onProgress?.({
+        stage: "map",
+        current: chapterMaps.length,
+        total: chapters.length,
+        message: `已加载 ${chapterMaps.length}/${chapters.length} 个已完成章节，从第 ${chapterMaps.length + 1} 章继续。`,
+      });
+    }
+
+    for (const chapter of chapters.slice(chapterMaps.length)) {
       const chapterMap =
         input.provider.kind === "mock"
           ? this.mockChapterMap(input, chapter)
@@ -778,17 +857,21 @@ export class AnalysisService {
     input: AnalyzeBookDto,
     chapter: ChapterSegment,
   ) {
-    const content = await this.modelProviders.chat(input.provider, [
-      {
-        role: "system",
-        content:
-          "你是中文长篇小说拆书架构师。你只返回合法 JSON，不使用 Markdown，不输出版权文本长摘录。",
-      },
-      {
-        role: "user",
-        content: this.bookChapterMapPrompt(input, chapter),
-      },
-    ]);
+    const content = await this.modelProviders.chat(
+      input.provider,
+      [
+        {
+          role: "system",
+          content:
+            "你是中文长篇小说拆书架构师。你只返回合法 JSON，不使用 Markdown，不输出版权文本长摘录。",
+        },
+        {
+          role: "user",
+          content: this.bookChapterMapPrompt(input, chapter),
+        },
+      ],
+      { maxOutputTokens: 1800 },
+    );
 
     return this.parseJson(content) as ChapterMapResult;
   }
@@ -798,17 +881,21 @@ export class AnalysisService {
     preprocessing: BookPreprocessResult,
     chapterMaps: ChapterMapResult[],
   ) {
-    const content = await this.modelProviders.chat(input.provider, [
-      {
-        role: "system",
-        content:
-          "你是中文长篇小说拆书架构师。你只返回合法 JSON，不使用 Markdown，不输出版权文本长摘录。",
-      },
-      {
-        role: "user",
-        content: this.bookReducePrompt(input, preprocessing, chapterMaps),
-      },
-    ]);
+    const content = await this.modelProviders.chat(
+      input.provider,
+      [
+        {
+          role: "system",
+          content:
+            "你是中文长篇小说拆书架构师。你只返回合法 JSON，不使用 Markdown，不输出版权文本长摘录。",
+        },
+        {
+          role: "user",
+          content: this.bookReducePrompt(input, preprocessing, chapterMaps),
+        },
+      ],
+      { maxOutputTokens: 3072 },
+    );
 
     return this.parseJson(content);
   }
@@ -816,6 +903,7 @@ export class AnalysisService {
   private buildRubricPrompt(input: BuildRubricDto): string {
     const styleProfile = this.buildStyleProfile(input);
     const marketProfile = this.buildMarketProfile(input);
+    const platformStrategy = this.buildPlatformStrategyProfile(input);
     return `
 请拆解一章成熟中文网文，提炼它为什么能让读者继续读，并生成可迁移的评分 Rubric。
 
@@ -824,6 +912,7 @@ export class AnalysisService {
 目标读者：${styleProfile.audienceLabel}
 阅读场景：${styleProfile.readingModeLabel}
 平台风格画像：${JSON.stringify(styleProfile.profile)}
+平台推荐策略假设：${platformStrategy.summary}
 细分分类：${marketProfile.category}
 主题承诺：${marketProfile.theme}
 标签：${marketProfile.tags.join("、") || "无"}
@@ -865,6 +954,14 @@ ${input.referenceText}
     "positioningPromise": "标题或简介承诺",
     "readerExpectationModel": ["该市场定位下读者默认期待的结构元素"]
   },
+  "platformStrategyProfile": {
+    "recommendationSignals": ["推荐信号假设"],
+    "competitionLevel": "赛道竞争程度",
+    "competitionRisk": "同质化和差异化风险",
+    "pushStage": "推流阶段",
+    "trafficEntry": ["可能入口"],
+    "strategyNote": "这只是平台策略假设，不是内部算法结论"
+  },
   "principles": [
     {
       "id": "p1",
@@ -904,6 +1001,7 @@ ${input.referenceText}
 Rubric 必须包含这些指标：${baseRubricMetrics.map((item) => item.name).join("、")}。
 Rubric 必须按目标平台和目标读者校准，不要只判断文学质量。
 Rubric 必须判断分类、主题、标签、关键词和隐性期待是否命中。
+Rubric 必须参考平台推荐策略假设，但不能声称掌握平台内部算法；要把它当作外部流量环境和编辑经验假设。
 关键词不是词频统计，而是读者点击期待信号。显性关键词要自然出现，隐性期待要落实到结构。
 如果参考章节优点和目标平台风格不完全一致，请明确哪些原则可迁移、哪些不该迁移。
 每个指标必须能用于评分，不要写空泛表述。
@@ -1486,9 +1584,12 @@ ${input.text}
   private scoreChapterPrompt(input: ScoreChapterDto): string {
     const styleProfile = this.buildStyleProfile(input);
     const marketProfile = this.buildMarketProfile(input);
+    const platformStrategy = this.buildPlatformStrategyProfile(input);
     const performanceSnapshot = this.buildPerformanceSnapshot(
       input.performanceSnapshot,
+      input,
     );
+    const aiSelfTest = this.buildAiSelfTestProfile(input.aiSelfTest);
     return `
 请使用给定 Rubric 质检用户章节。你要像网文编辑一样严格打分，并指出具体证据、问题和改法。
 
@@ -1496,6 +1597,7 @@ ${input.text}
 目标读者：${styleProfile.audienceLabel}
 阅读场景：${styleProfile.readingModeLabel}
 平台风格画像：${JSON.stringify(styleProfile.profile)}
+平台推荐策略假设：${platformStrategy.summary}
 细分分类：${marketProfile.category}
 主题承诺：${marketProfile.theme}
 标签：${marketProfile.tags.join("、") || "无"}
@@ -1503,6 +1605,8 @@ ${input.text}
 隐性期待：${marketProfile.implicitExpectations.join("、") || "无"}
 标题/简介承诺：${marketProfile.positioningPromise || "无"}
 数据表现快照：${performanceSnapshot.summary}
+数据指标口径：${performanceSnapshot.guidance}
+AI 自测增强：${aiSelfTest.summary}
 
 Rubric：
 ${JSON.stringify(input.rubric, null, 2)}
@@ -1543,16 +1647,41 @@ ${input.chapterText}
     "keywordRisk": "显性关键词或隐性期待命中不足的风险",
     "frontloadRisk": "卖点没有足够前置的风险"
   },
+  "platformStrategyFit": {
+    "score": 7,
+    "recommendationRisk": "正文对推荐信号假设的最大不匹配",
+    "competitionRisk": "赛道竞争下的同质化或差异化不足",
+    "pushBottleneck": "当前推流阶段最可能卡住的位置",
+    "trafficEntryAction": "按入口标签/推荐场景最该优先改什么"
+  },
   "performanceFit": {
     "hasData": true,
     "funnelSummary": "用一句话总结数据漏斗",
     "impressionDiagnosis": "展现量对应的入口/分发问题；没有数据则写未提供",
     "clickDiagnosis": "点击率对应的标题、分类、关键词承诺问题；没有数据则写未提供",
+    "validReadDiagnosis": "有效阅读率对应的平台有效阅读口径、开头承诺和跳出问题；没有数据或平台不适用则写未提供/不适用",
     "read30sDiagnosis": "阅读30s对应的开头理解成本和初始钩子问题；没有数据则写未提供",
-    "read60sDiagnosis": "阅读60s对应的冲突升级和情绪维持问题；没有数据则写未提供",
+    "read60sDiagnosis": "阅读60s对应的冲突升级和情绪维持问题；长篇追更场景只作为低权重辅助，不能当核心指标；没有数据则写未提供",
     "bottomDiagnosis": "触底率对应的中后段节奏、信息密度和段落功能问题；没有数据则写未提供",
     "followDiagnosis": "追更对应的结尾钩子、长期目标和系列承诺问题；没有数据则写未提供",
+    "bookshelfDiagnosis": "加书架率对应的长期收藏价值、设定吸引力和追读承诺问题；没有数据则写未提供",
+    "firstChapterCompletionDiagnosis": "首章完读率对应的首章结构、爽点兑现和信息负担问题；没有数据则写未提供",
+    "avgReadProgressDiagnosis": "短篇付费平均阅读进度对应的全文节奏、付费前后断点和弃读位置问题；没有数据或长篇不适用则写未提供/不适用",
+    "paidUnlockDiagnosis": "短篇付费解锁率对应的付费点前置、情绪债和付费理由问题；没有数据或长篇不适用则写未提供/不适用",
+    "nextChapterClickDiagnosis": "章末下一章点击率对应的断章钩子和未完成期待问题；没有数据则写未提供",
+    "threeChapterRetentionDiagnosis": "前3章留存率对应的连续承诺兑现、主线清晰度和节奏稳定性问题；没有数据则写未提供",
     "priority": "最该先修的漏斗环节"
+  },
+  "selfTestFit": {
+    "enabled": true,
+    "summary": "一句话总结 AI 自测发现的核心问题；未启用则写未启用",
+    "dialogueMaskDiagnosis": "遮挡人名后，对话是否还能区分人物声音；未启用则写未启用",
+    "jumpReadDiagnosis": "随机跳过 3 段后，主线是否仍连贯；未启用则写未启用",
+    "emotionDiagnosis": "悲伤/激动/爽点情节是否产生真实情绪，而不是只写情绪词；未启用则写未启用",
+    "settingRecapDiagnosis": "人物年龄、身份、关键事件和设定是否前后自洽；未启用则写未启用",
+    "deleteSentenceDiagnosis": "删掉环境/心理描写后剧情是否几乎不受影响，判断注水风险；未启用则写未启用",
+    "aiTraceDiagnosis": "是否存在 AI 模板化短板：专属记忆弱、情绪浅、伏笔短线化、语言同质化；未启用则写未启用",
+    "promptAddons": ["应该写进改文提示词的具体约束"]
   },
   "nextRevisionMove": "下一步最该改什么",
   "rewriteBrief": {
@@ -1573,8 +1702,67 @@ ${input.chapterText}
 5. 评分不是文学奖评分，而是目标平台读者是否愿意继续读的商业阅读体验评分。
 6. 如果关键词没有直接出现但隐性期待已经被结构满足，要说明；如果关键词出现但没有承载期待，也要扣分。
 7. 数据表现只做归因辅助，不要把低数据直接等同于文本差；要结合章节证据判断可能原因。
-8. revisionPrompt 要写给另一个“负责改文的 AI”，让它知道怎么改文；不要让它重新开新故事。
+8. 必须按目标平台和阅读场景判断指标权重：长篇追更以首章完读、加书架/收藏、下一章点击、前3章留存、追更为核心；短篇付费以全文完读、平均阅读进度、付费解锁为核心；阅读60s在长篇里只作低权重参考。
+9. 平台推荐策略只能作为假设和经验归因，不能写成平台内部算法结论；要结合正文证据判断是否能提高点击、有效阅读、收藏/追更或付费转化。
+10. revisionPrompt 要写给另一个“负责改文的 AI”，让它知道怎么改文；不要让它重新开新故事。
+11. 如果启用 AI 自测增强，必须由你基于用户章节自行执行测试，不要要求用户填结果；测试结论只能作为辅助证据，仍要回到章节文本和 Rubric。
+12. revisionPrompt 必须吸收 selfTestFit.promptAddons，把“遮挡人名、跳读、共情、设定复盘、删句、AI 味”转化为改文 AI 可执行的约束。
 `.trim();
+  }
+
+  private inferReferenceProfilePrompt(input: InferReferenceProfileDto): string {
+    const styleProfile = this.buildStyleProfile(input);
+    const referenceSample = this.buildReferenceProfileSample(
+      input.referenceText,
+    );
+    return `
+请根据参考章节内容，识别它最适合用于后续拆解和质检的市场定位。你要像网文平台编辑一样判断，而不是只做关键词匹配。
+
+已知上下文：
+- 目标平台：${styleProfile.platformLabel}
+- 目标读者：${styleProfile.audienceLabel}
+- 阅读场景：${styleProfile.readingModeLabel}
+- 用户提供的参考标题：${input.referenceTitle || "未提供"}
+
+参考章节：
+${referenceSample}
+
+请严格返回这个 JSON 结构：
+{
+  "mode": "ai-reference-profile",
+  "referenceTitle": "如果正文有章节标题则用正文标题，否则用用户提供标题，否则概括一个短标题",
+  "genre": "xuanhuan | urban | romance | suspense | infinite-flow | other",
+  "category": "更细分的市场分类，最长 20 字",
+  "theme": "本章最核心的读者承诺，最长 20 字",
+  "tags": ["3到6个读者能理解的标签"],
+  "explicitKeywords": ["3到6个可见关键词或高频意象"],
+  "implicitExpectations": ["3到6个隐性期待，例如被低估、反转、后悔、规则破解、情绪拉扯"],
+  "positioningPromise": "一句话标题/简介承诺，说明读者点进来期待看到什么",
+  "confidence": 0.82,
+  "evidence": ["最多3条来自参考章节的判断依据，每条不超过30字"],
+  "notes": "需要用户校正的风险点；如果没有就写空字符串"
+}
+
+要求：
+1. genre 必须只能是 xuanhuan、urban、romance、suspense、infinite-flow、other 之一。
+2. 不要机械抓词。要判断这些词背后的读者期待和平台消费语境。
+3. 如果题材混合，genre 选主导消费类型，category 写更细分的混合定位。
+4. tags、explicitKeywords、implicitExpectations 不能空。
+5. confidence 是 0 到 1 的数字。文本太短或信息不足时降低 confidence，并在 notes 说明。
+`.trim();
+  }
+
+  private buildReferenceProfileSample(text: string): string {
+    const normalized = text.trim();
+    if (normalized.length <= 7000) {
+      return normalized;
+    }
+
+    return `${normalized.slice(0, 5200)}
+
+……中间内容已省略，用于加快市场定位识别……
+
+${normalized.slice(-1600)}`;
   }
 
   private mockRubric(input: BuildRubricDto) {
@@ -1664,12 +1852,34 @@ ${input.chapterText}
     };
   }
 
+  private mockReferenceProfile(input: InferReferenceProfileDto) {
+    return {
+      mode: "mock-reference-profile",
+      referenceTitle: input.referenceTitle?.trim() || "参考章节",
+      genre: "other",
+      category: "待模型识别",
+      theme: "待模型识别",
+      tags: ["待识别"],
+      explicitKeywords: ["待识别"],
+      implicitExpectations: ["待识别"],
+      positioningPromise:
+        "演示模式不读取真实市场定位；配置真实模型后可自动识别。",
+      confidence: 0,
+      evidence: [],
+      notes:
+        "当前是演示模式，只验证接口结构；请配置真实 Provider 获得 AI 识别结果。",
+    };
+  }
+
   private mockScore(input: ScoreChapterDto) {
     const styleProfile = this.buildStyleProfile(input);
     const marketProfile = this.buildMarketProfile(input);
+    const platformStrategy = this.buildPlatformStrategyProfile(input);
     const performanceSnapshot = this.buildPerformanceSnapshot(
       input.performanceSnapshot,
+      input,
     );
+    const aiSelfTest = this.buildAiSelfTestProfile(input.aiSelfTest);
     const lengthScore = input.chapterText.length > 800 ? 6.8 : 5.4;
     const rubric = input.rubric as {
       metrics?: Array<{ id: string; name: string }>;
@@ -1686,13 +1896,13 @@ ${input.chapterText}
         metricId: metric.id,
         name: metric.name,
         score: lengthScore,
-        reason: "mock 模式只验证接口和报告结构，不判断真实文本质量。",
+        reason: "演示模式只验证接口和报告结构，不判断真实文本质量。",
         evidence: input.chapterText.slice(0, 40),
         fix: "接入真实 OpenAI-compatible Provider 后，让模型给出证据段落和局部改法。",
         referencePrincipleId: "p1",
       })),
       strongestPoint: "章节已经可以进入结构化质检流程。",
-      weakestPoint: "mock 模式不会读取真实剧情逻辑。",
+      weakestPoint: "演示模式不会读取真实剧情逻辑。",
       styleFit: {
         score: lengthScore,
         platformRisk: `${styleProfile.platformLabel} 需要按平台节奏重新验证真实文本。`,
@@ -1707,10 +1917,24 @@ ${input.chapterText}
         frontloadRisk:
           "卖点是否出现在前段并支撑点击后的继续阅读，需要真实模型判断。",
       },
+      platformStrategyFit: {
+        score: lengthScore,
+        recommendationRisk: platformStrategy.recommendationSignals.length
+          ? `已接收推荐信号假设：${platformStrategy.recommendationSignals.join("、")}；真实模型会检查正文是否支撑这些信号。`
+          : "未提供推荐信号假设。",
+        competitionRisk:
+          platformStrategy.competitionLevel === "high"
+            ? "高竞争赛道下，需要更早给出差异化钩子，避免只复用常见开局。"
+            : `${platformStrategy.competitionLabel}赛道下，仍需检查卖点辨识度。`,
+        pushBottleneck: `当前推流阶段假设为${platformStrategy.pushStageLabel}，演示模式不判断真实卡点。`,
+        trafficEntryAction: platformStrategy.trafficEntry.length
+          ? `优先让前段兑现入口标签：${platformStrategy.trafficEntry.join("、")}。`
+          : "未提供入口标签，建议补充推荐流、分类页或关键词入口。",
+      },
       performanceFit: {
         hasData: performanceSnapshot.hasData,
         funnelSummary: performanceSnapshot.hasData
-          ? "mock 模式已接收数据漏斗，真实模型会结合文本证据做归因。"
+          ? `演示模式已接收数据漏斗。${performanceSnapshot.guidance}`
           : "未提供数据表现快照，仅进行文本结构评分。",
         impressionDiagnosis: performanceSnapshot.values.impressions
           ? `展现量 ${performanceSnapshot.values.impressions}，需要结合平台分发和标签命中判断入口问题。`
@@ -1718,11 +1942,18 @@ ${input.chapterText}
         clickDiagnosis: performanceSnapshot.values.clickThroughRate
           ? `点击率 ${performanceSnapshot.values.clickThroughRate}%，优先检查标题/简介承诺和正文卖点是否一致。`
           : "未提供点击率。",
+        validReadDiagnosis: performanceSnapshot.values.validReadRate
+          ? `有效阅读 ${performanceSnapshot.values.validReadRate}%，优先检查点击后前段是否快速兑现承诺，避免平台判定无效阅读或快速跳出。`
+          : performanceSnapshot.context.isAlgorithmPlatform
+            ? "未提供有效阅读率。"
+            : "当前平台口径下不作为核心指标。",
         read30sDiagnosis: performanceSnapshot.values.read30sRate
           ? `阅读30s ${performanceSnapshot.values.read30sRate}%，优先检查开头500字是否快速建立目标、冲突和卖点。`
           : "未提供阅读30s。",
         read60sDiagnosis: performanceSnapshot.values.read60sRate
-          ? `阅读60s ${performanceSnapshot.values.read60sRate}%，优先检查冲突是否持续升级。`
+          ? performanceSnapshot.context.isLongSerialization
+            ? `阅读60s ${performanceSnapshot.values.read60sRate}%，长篇场景只作低权重参考，优先回看首章完读、下一章点击和前三章留存。`
+            : `阅读60s ${performanceSnapshot.values.read60sRate}%，优先检查冲突是否持续升级。`
           : "未提供阅读60s。",
         bottomDiagnosis: performanceSnapshot.values.bottomRate
           ? `触底率 ${performanceSnapshot.values.bottomRate}%，优先检查中后段是否空转或信息重复。`
@@ -1730,9 +1961,69 @@ ${input.chapterText}
         followDiagnosis: performanceSnapshot.values.followRate
           ? `追更 ${performanceSnapshot.values.followRate}%，优先检查章节末钩子和长期目标是否足够明确。`
           : "未提供追更。",
+        bookshelfDiagnosis: performanceSnapshot.values.bookshelfRate
+          ? `加书架 ${performanceSnapshot.values.bookshelfRate}%，优先检查首章是否给出足够强的长期收藏理由。`
+          : "未提供加书架率。",
+        firstChapterCompletionDiagnosis: performanceSnapshot.values
+          .firstChapterCompletionRate
+          ? performanceSnapshot.context.isShortForm
+            ? `全文完读 ${performanceSnapshot.values.firstChapterCompletionRate}%，优先检查短篇中后段是否持续兑现情绪和付费承诺。`
+            : `首章完读 ${performanceSnapshot.values.firstChapterCompletionRate}%，优先检查首章中段是否空转或信息负担过重。`
+          : performanceSnapshot.context.isShortForm
+            ? "未提供全文完读率。"
+            : "未提供首章完读率。",
+        avgReadProgressDiagnosis: performanceSnapshot.values.avgReadProgressRate
+          ? `平均阅读进度 ${performanceSnapshot.values.avgReadProgressRate}%，优先定位短篇在哪个段落开始掉读。`
+          : performanceSnapshot.context.isShortForm
+            ? "未提供平均阅读进度。"
+            : "长篇场景不作为核心指标。",
+        paidUnlockDiagnosis: performanceSnapshot.values.paidUnlockRate
+          ? `付费解锁 ${performanceSnapshot.values.paidUnlockRate}%，优先检查付费点前的情绪债、悬念和收益承诺是否足够。`
+          : performanceSnapshot.context.isShortForm
+            ? "未提供付费解锁率。"
+            : "长篇场景不适用。",
+        nextChapterClickDiagnosis: performanceSnapshot.values
+          .nextChapterClickRate
+          ? `章末下一章点击 ${performanceSnapshot.values.nextChapterClickRate}%，优先检查断章钩子是否制造未完成期待。`
+          : performanceSnapshot.context.isShortForm
+            ? "短篇付费不使用章末下一章点击作为核心指标。"
+            : "未提供章末下一章点击率。",
+        threeChapterRetentionDiagnosis: performanceSnapshot.values
+          .threeChapterRetentionRate
+          ? `前3章留存 ${performanceSnapshot.values.threeChapterRetentionRate}%，优先检查前三章承诺是否连续兑现、主线是否稳定。`
+          : performanceSnapshot.context.isShortForm
+            ? "短篇付费不使用前3章留存作为核心指标。"
+            : "未提供前3章留存率。",
         priority: performanceSnapshot.hasData
-          ? "先看点击率和30s，再看触底率和追更。"
+          ? performanceSnapshot.context.isShortForm
+            ? "短篇先看点击、全文完读、平均阅读进度和付费解锁。"
+            : "长篇先看点击、30s、首章完读、加书架/收藏、下一章点击、前3章留存和追更。"
           : "先补充平台后台数据，再做漏斗归因。",
+      },
+      selfTestFit: {
+        enabled: aiSelfTest.enabled,
+        summary: aiSelfTest.enabled
+          ? `演示模式已启用 AI 自测增强：${aiSelfTest.enabledLabels.join("、")}。真实模型会直接根据章节文本执行这些测试，不需要用户手填结果。`
+          : "未启用 AI 自测增强。",
+        dialogueMaskDiagnosis: aiSelfTest.enabled
+          ? "真实模型会遮挡人名检查对话声音辨识度，避免所有角色说话像同一个人。"
+          : "未启用。",
+        jumpReadDiagnosis: aiSelfTest.enabled
+          ? "真实模型会模拟跳读检查主线是否断裂，定位过渡和逻辑割裂风险。"
+          : "未启用。",
+        emotionDiagnosis: aiSelfTest.enabled
+          ? "真实模型会检查情绪是否由动作、场面和选择触发，而不是只写难过、激动等标签。"
+          : "未启用。",
+        settingRecapDiagnosis: aiSelfTest.enabled
+          ? "真实模型会复盘人物身份、关键事件和设定约束，检查前后矛盾。"
+          : "未启用。",
+        deleteSentenceDiagnosis: aiSelfTest.enabled
+          ? "真实模型会检查环境和心理描写是否承担信息、情绪或节奏功能，识别注水段落。"
+          : "未启用。",
+        aiTraceDiagnosis: aiSelfTest.enabled
+          ? "真实模型会识别专属细节不足、情绪浅层、伏笔短线化和语言模板化等 AI 味。"
+          : "未启用。",
+        promptAddons: aiSelfTest.promptAddons,
       },
       nextRevisionMove:
         "配置真实模型后重新评分，重点检查目标、冲突、情绪债和钩子。",
@@ -1746,6 +2037,7 @@ ${input.chapterText}
           styleProfile,
           marketProfile,
           performanceSnapshot,
+          aiSelfTest,
         }),
       },
     };
@@ -2457,6 +2749,52 @@ ${input.chapterText}
     };
   }
 
+  private buildPlatformStrategyProfile(input: {
+    recommendationSignals?: string[];
+    competitionLevel?: string;
+    competitionNotes?: string;
+    pushStage?: string;
+    trafficEntry?: string[];
+  }) {
+    const recommendationSignals = this.cleanList(input.recommendationSignals);
+    const trafficEntry = this.cleanList(input.trafficEntry);
+    const competitionLevel = input.competitionLevel || "unknown";
+    const pushStage = input.pushStage || "unknown";
+    const competitionLabels: Record<string, string> = {
+      low: "低竞争",
+      medium: "中等竞争",
+      high: "高竞争",
+      unknown: "未知",
+    };
+    const pushStageLabels: Record<string, string> = {
+      "cold-start": "冷启动",
+      "second-push": "二轮推流",
+      stable: "稳定推荐",
+      recycle: "复推/召回",
+      unknown: "未知",
+    };
+    const summary = [
+      `推荐信号：${recommendationSignals.join("、") || "未提供"}`,
+      `赛道竞争：${competitionLabels[competitionLevel] || competitionLevel}`,
+      input.competitionNotes?.trim()
+        ? `竞争备注：${input.competitionNotes.trim()}`
+        : "竞争备注：未提供",
+      `推流阶段：${pushStageLabels[pushStage] || pushStage}`,
+      `可能入口：${trafficEntry.join("、") || "未提供"}`,
+    ].join("；");
+
+    return {
+      recommendationSignals,
+      competitionLevel,
+      competitionLabel: competitionLabels[competitionLevel] || competitionLevel,
+      competitionNotes: input.competitionNotes?.trim() || "",
+      pushStage,
+      pushStageLabel: pushStageLabels[pushStage] || pushStage,
+      trafficEntry,
+      summary,
+    };
+  }
+
   private cleanList(value?: string[]) {
     return [
       ...new Set((value || []).map((item) => item.trim()).filter(Boolean)),
@@ -2465,25 +2803,123 @@ ${input.chapterText}
 
   private buildPerformanceSnapshot(
     value?: ScoreChapterDto["performanceSnapshot"],
+    context?: Pick<ScoreChapterDto, "platform" | "readingMode">,
   ) {
+    const isShortForm =
+      context?.readingMode === "short-paid" ||
+      context?.platform === "wechat-short";
+    const isLongSerialization = context?.readingMode === "long-serialization";
+    const isAlgorithmPlatform =
+      context?.platform === "fanqie" ||
+      context?.platform === "qimao" ||
+      context?.platform === "wechat-short";
     const values = {
       impressions: value?.impressions,
       clickThroughRate: value?.clickThroughRate,
+      validReadRate: value?.validReadRate,
       bottomRate: value?.bottomRate,
       read30sRate: value?.read30sRate,
       read60sRate: value?.read60sRate,
       followRate: value?.followRate,
+      bookshelfRate: value?.bookshelfRate,
+      firstChapterCompletionRate: value?.firstChapterCompletionRate,
+      avgReadProgressRate: value?.avgReadProgressRate,
+      paidUnlockRate: value?.paidUnlockRate,
+      nextChapterClickRate: value?.nextChapterClickRate,
+      threeChapterRetentionRate: value?.threeChapterRetentionRate,
+    };
+    const labels: Record<keyof typeof values, string> = {
+      impressions: "展现量",
+      clickThroughRate: "点击率",
+      validReadRate: "有效阅读率",
+      bottomRate: isShortForm ? "全文触底率" : "触底率",
+      read30sRate: "阅读30s",
+      read60sRate: isLongSerialization ? "阅读60s（长篇低权重）" : "阅读60s",
+      followRate: "追更率",
+      bookshelfRate:
+        context?.platform === "jinjiang"
+          ? "收藏率"
+          : context?.platform === "qidian"
+            ? "收藏/书架率"
+            : isShortForm
+              ? "收藏意向"
+              : "加书架率",
+      firstChapterCompletionRate: isShortForm ? "全文完读率" : "首章完读率",
+      avgReadProgressRate: "平均阅读进度",
+      paidUnlockRate: "付费解锁率",
+      nextChapterClickRate: "章末下一章点击率",
+      threeChapterRetentionRate: "前3章留存率",
     };
     const entries = Object.entries(values).filter(
       ([, item]) => item !== undefined,
-    );
+    ) as Array<[keyof typeof values, number]>;
+    const guidance = isShortForm
+      ? "当前按短篇付费/小程序文口径归因：核心看点击、有效阅读、全文完读、平均阅读进度、付费解锁；追更、下一章点击、前3章留存不作为核心指标。"
+      : isLongSerialization
+        ? "当前按长篇追更口径归因：核心看点击、阅读30s、首章完读、加书架/收藏、章末下一章点击、前3章留存和追更；阅读60s只作低权重辅助。"
+        : "当前按移动端连载口径归因：核心看点击、有效阅读、阅读30s/60s、触底、加书架/收藏、章末下一章点击和前3章留存。";
 
     return {
       hasData: entries.length > 0,
       values,
+      context: {
+        isShortForm,
+        isLongSerialization,
+        isAlgorithmPlatform,
+      },
+      guidance,
       summary: entries.length
-        ? entries.map(([key, item]) => `${key}: ${item}`).join(", ")
+        ? entries.map(([key, item]) => `${labels[key]}: ${item}`).join(", ")
         : "未提供数据表现快照",
+    };
+  }
+
+  private buildAiSelfTestProfile(value?: ScoreChapterDto["aiSelfTest"]) {
+    const allTests = [
+      "dialogue-mask",
+      "jump-read",
+      "emotion",
+      "setting-recap",
+      "delete-sentence",
+      "ai-trace",
+    ];
+    const labelMap: Record<string, string> = {
+      "dialogue-mask": "遮挡人名测试：删除人物名后检查对话声音是否可区分",
+      "jump-read": "跳读测试：随机跳过 3 段后检查主线是否仍连贯",
+      emotion: "共情测试：检查情绪是否由场景、动作和选择触发",
+      "setting-recap": "复盘设定测试：核对人物身份、关键事件和设定自洽",
+      "delete-sentence": "删句测试：检查描写删掉后是否影响剧情和情绪",
+      "ai-trace": "AI 味测试：识别专属细节弱、情绪浅、伏笔短线化和语言模板化",
+    };
+    const promptAddonMap: Record<string, string> = {
+      "dialogue-mask":
+        "改写时让主要角色的对话在遮掉人名后仍能区分身份、立场和情绪，不要所有人使用同一种句式。",
+      "jump-read":
+        "改写时补齐关键转场、因果词和行动目标，让读者跳过少量段落后仍能理解主线推进。",
+      emotion:
+        "改写时用动作、场景反应、具体选择和代价制造情绪，不要只用“难过、激动、愤怒”等标签。",
+      "setting-recap":
+        "改写时保持人物身份、年龄、能力边界、时间线和关键事件前后一致，新增设定必须服务本章冲突。",
+      "delete-sentence":
+        "改写时删除或合并不承担信息、情绪、节奏、伏笔功能的环境和心理描写。",
+      "ai-trace":
+        "改写时增加只属于本角色/本场景的细节、长线伏笔和非模板表达，降低一键生成感。",
+    };
+    const requestedTests = value?.tests?.length ? value.tests : allTests;
+    const enabled = value?.enabled !== false && requestedTests.length > 0;
+    const tests = enabled
+      ? [...new Set(requestedTests)].filter((test) => allTests.includes(test))
+      : [];
+    const enabledLabels = tests.map((test) => labelMap[test]);
+
+    return {
+      enabled,
+      tests,
+      enabledLabels,
+      promptAddons: tests.map((test) => promptAddonMap[test]),
+      summary: enabled
+        ? `启用。请由模型自行执行这些测试：${enabledLabels.join("；")}。用户不提供测试答案。`
+        : "未启用。",
     };
   }
 
@@ -2495,9 +2931,11 @@ ${input.chapterText}
       performanceSnapshot: ReturnType<
         AnalysisService["buildPerformanceSnapshot"]
       >;
+      aiSelfTest: ReturnType<AnalysisService["buildAiSelfTestProfile"]>;
     },
   ) {
-    const { styleProfile, marketProfile, performanceSnapshot } = context;
+    const { styleProfile, marketProfile, performanceSnapshot, aiSelfTest } =
+      context;
     return `
 你是负责改文的中文网文写作 AI。请基于下面的定位和问题，对章节做“局部增强式改写”，不要另起炉灶。
 
@@ -2514,12 +2952,17 @@ ${input.chapterText}
 标题/简介承诺：${marketProfile.positioningPromise || "无"}
 
 数据表现：${performanceSnapshot.summary}
+数据口径：${performanceSnapshot.guidance}
+AI 自测约束：${aiSelfTest.summary}
 
 请优先修改：
 1. 前 500 字更早亮出分类卖点和主角目标。
 2. 把标签和关键词转化为事件、冲突、情绪债，不要机械堆词。
 3. 增强目标平台需要的节奏、情绪反馈和结尾钩子。
 4. 保留原章节的基本人物、场景和剧情事实，只调整表达、顺序、冲突强度和钩子。
+${aiSelfTest.promptAddons
+  .map((item, index) => `${index + 5}. ${item}`)
+  .join("\n")}
 
 禁止：
 1. 不要新增无关世界观和大量设定说明。
