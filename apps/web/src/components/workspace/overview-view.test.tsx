@@ -17,6 +17,7 @@ const baseProps = {
 	quickLoading: false,
 	quickElapsedSeconds: 0,
 	quickReviewResult: null,
+	quickReviewGenre: "",
 	chapterText: "",
 	chapterCompletion: 50,
 	nextChapterAction: "生成评分标准",
@@ -39,7 +40,10 @@ const baseProps = {
 	bookTitle: "示例长篇小说",
 	bookCompletion: 0,
 	onChapterTextChange: vi.fn(),
+	onQuickReviewGenreChange: vi.fn(),
 	onRunQuickExperience: vi.fn(),
+	onRerunQuickExperience: vi.fn(),
+	hasQuickReviewCache: false,
 	onUseExampleChapter: vi.fn(),
 	onOpenModel: vi.fn(),
 	onOpenCritique: vi.fn(),
@@ -51,14 +55,14 @@ describe("OverviewView", () => {
 	it("renders the workspace status dashboard from supplied state", () => {
 		const html = renderToStaticMarkup(<OverviewView {...baseProps} />);
 
-		expect(html).toContain("看懂爆款");
-		expect(html).toContain("快速点评");
-		expect(html).toContain("模型状态");
+		expect(html).toContain("AI 网文作者的第一章质检台");
+		expect(html).toContain("章节急诊");
+		expect(html).toContain("当前模型");
 		expect(html).toContain("本地演示");
-		expect(html).toContain("单章项目进度");
-		expect(html).toContain("平台策略画像");
+		expect(html).toContain("高级质检进度");
+		expect(html).toContain("高级能力放在后面");
 		expect(html).toContain("番茄小说");
-		expect(html).toContain("最近评分摘要");
+		expect(html).toContain("整书资产");
 	});
 
 	it("shows latest score evidence when a report exists", () => {

@@ -1,6 +1,7 @@
 import {
   Body,
   Controller,
+  Delete,
   Get,
   HttpCode,
   Param,
@@ -176,8 +177,37 @@ export class AnalysisController {
   @Get("book/jobs/:jobId")
   @Public()
   @ApiOperation({ summary: "Read async book analysis job status" })
-  getBookAnalysisJob(@Param("jobId") jobId: string) {
-    return this.analysisService.getBookAnalysisJob(jobId);
+  getBookAnalysisJob(
+    @Param("jobId") jobId: string,
+    @Query("includeResult") includeResult?: string,
+  ) {
+    return this.analysisService.getBookAnalysisJob(jobId, {
+      includeResult: includeResult !== "false",
+    });
+  }
+
+  @Delete("book/jobs/:jobId")
+  @Public()
+  @ApiOperation({ summary: "Delete a completed or failed book analysis job" })
+  deleteBookAnalysisJob(@Param("jobId") jobId: string) {
+    return this.analysisService.deleteBookAnalysisJob(jobId);
+  }
+
+  @Get("book/jobs/:jobId/search")
+  @Public()
+  @ApiOperation({
+    summary: "Search chunk-level evidence anchors inside a succeeded book job",
+  })
+  searchBookAnalysisEvidence(
+    @Param("jobId") jobId: string,
+    @Query("q") query?: string,
+    @Query("limit") limit?: string,
+  ) {
+    return this.analysisService.searchBookAnalysisEvidence(
+      jobId,
+      query || "",
+      limit ? Number(limit) : undefined,
+    );
   }
 
   @Get("book/jobs")
@@ -217,7 +247,7 @@ export class AnalysisController {
   @UseInterceptors(
     FileInterceptor("file", {
       limits: {
-        fileSize: 10 * 1024 * 1024,
+        fileSize: 50 * 1024 * 1024,
       },
     }),
   )

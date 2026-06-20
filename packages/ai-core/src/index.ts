@@ -185,6 +185,21 @@ export interface ScoreResult {
   };
 }
 
+export type RecommendedPlatformId =
+  | "qidian"
+  | "fanqie"
+  | "jinjiang"
+  | "qimao"
+  | "wechat-short"
+  | "other";
+
+export interface RecommendedPlatform {
+  id: RecommendedPlatformId;
+  label: string;
+  fit: string;
+  reason: string;
+}
+
 export interface QuickReviewResult {
   title: string;
   genre: string;
@@ -192,6 +207,7 @@ export interface QuickReviewResult {
   sellingPoints: string[];
   mainProblem: string;
   actionableFixes: string[];
+  recommendedPlatforms: RecommendedPlatform[];
   readyForFullReview: boolean;
   readyReason: string;
   quickScore: number;

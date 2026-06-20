@@ -4,8 +4,9 @@ import axios, { type AxiosInstance, type AxiosResponse } from "axios";
 
 // API 响应的基础结构
 interface BaseResponse<T> {
-	code: string;
-	msg: string;
+	code: string | number;
+	msg?: string;
+	message?: string;
 	data: T;
 }
 
@@ -36,28 +37,24 @@ const http: AxiosInstance = axios.create({
 
 http.interceptors.response.use(
 	(response: AxiosResponse<BaseResponse<any>>) => {
-		const { code, msg, data } = response.data;
-		// 假设 '00000' 是成功的业务代码
-		if (code === "00000") {
+		const { code, msg, message, data } = response.data;
+		if (code === "00000" || code === 0) {
 			// 直接返回业务数据
 			return data as any;
 		}
 
 		// 如果是业务错误，则抛出 ApiError
-		return Promise.reject(new ApiError(code, msg, data as any));
+		return Promise.reject(
+			new ApiError(String(code), message || msg || "Request failed", data as any),
+		);
 	},
 	(error) => {
-		// 处理网络层面的错误 (e.g., 404, 500)
-		// 你可以在这里添加更复杂的逻辑，例如根据状态码跳转页面
-		if (error.response) {
-			console.error("API Error Response:", error.response);
-		} else if (error.request) {
-			console.error("API Error Request:", error.request);
-		} else {
-			console.error("API Error Message:", error.message);
-		}
-		// 抛出原始的 axios 错误，或者一个更友好的错误对象
-		return Promise.reject(error);
+		const message =
+			error.response?.data?.message ||
+			error.response?.data?.msg ||
+			error.message ||
+			"Network request failed";
+		return Promise.reject(new ApiError(String(error.response?.status || "NETWORK"), message));
 	},
 );
 

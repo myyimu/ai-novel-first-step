@@ -86,6 +86,11 @@
 	body {
 		@apply bg-background text-foreground;
 	}
+
+	textarea,
+	select {
+		@apply outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2;
+	}
 }
 
 /* Toast 自定义样式 */

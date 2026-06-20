@@ -24,6 +24,10 @@
     "one-cli"
   ],
   "packageManager": "pnpm@10.14.0",
+  "engines": {
+    "node": ">=20.11.0 <21",
+    "pnpm": ">=10.14.0 <11"
+  },
   "scripts": {
     "dev": "one dev",
     "dev:dry-run": "one dev --dry-run",
@@ -34,10 +38,15 @@
     "dev:web:raw": "pnpm --filter web dev",
     "dev:api:raw": "pnpm --filter api dev",
     "dev:core:raw": "pnpm --filter @ai-novel-first-step/ai-core dev",
+    "one:doctor": "node scripts/one-doctor.mjs",
+    "container:prepare": "node scripts/prepare-one-container.mjs",
+    "container:dry-run": "pnpm run container:prepare && one container build --dry-run -o json",
     "start:local": "powershell -NoProfile -ExecutionPolicy Bypass -File ./scripts/start-local.ps1",
+    "doctor": "pnpm run ci && pnpm run container:prepare && pnpm run one:doctor",
     "build": "pnpm -r --if-present build",
     "lint": "pnpm -r --if-present lint",
     "format": "pnpm -r --if-present format",
+    "typecheck": "pnpm -r --if-present typecheck",
     "check": "pnpm -r --if-present check",
     "test": "pnpm -r --if-present test",
     "ci": "pnpm run check && pnpm run test && pnpm run build",

@@ -1,4 +1,6 @@
 import { BadRequestException, Injectable } from "@nestjs/common";
+import { lookup } from "node:dns/promises";
+import { isIP } from "node:net";
 import type { ProviderPreset } from "@ai-novel-first-step/ai-core";
 import { ProviderConfigDto } from "./dto/provider-config.dto";
 
@@ -9,6 +11,10 @@ export interface ProviderMessage {
 
 export interface ProviderChatOptions {
   maxOutputTokens?: number;
+  jsonSchema?: {
+    name: string;
+    schema: Record<string, unknown>;
+  };
 }
 
 const providerPresets: Array<
@@ -91,6 +97,50 @@ const providerPresets: Array<
   },
 ];
 
+const defaultSharedGpuFallback = {
+  apiKey: "0000000000",
+  baseUrl: "https://aihorde.net/api/v2",
+  label: "AI Horde 匿名共享池",
+};
+
+const DEFAULT_PROVIDER_TIMEOUT_MS = 60_000;
+const MAX_ERROR_BODY_LENGTH = 1_000;
+
+function providerTimeoutMs() {
+  const raw = Number(process.env.PROVIDER_REQUEST_TIMEOUT_MS);
+  return Number.isFinite(raw) && raw > 0 ? raw : DEFAULT_PROVIDER_TIMEOUT_MS;
+}
+
+function isPrivateIpAddress(address: string) {
+  if (address === "::1") return true;
+  if (address.startsWith("fe80:")) return true;
+  if (address.startsWith("fc") || address.startsWith("fd")) return true;
+
+  const parts = address.split(".").map((part) => Number(part));
+  if (parts.length !== 4 || parts.some((part) => !Number.isInteger(part))) {
+    return false;
+  }
+
+  const [first, second] = parts;
+  return (
+    first === 10 ||
+    first === 127 ||
+    (first === 169 && second === 254) ||
+    (first === 172 && second >= 16 && second <= 31) ||
+    (first === 192 && second === 168) ||
+    first === 0
+  );
+}
+
+function isAllowedLocalOllama(provider: ProviderConfigDto, url: URL) {
+  return (
+    provider.preset === "ollama" &&
+    url.protocol === "http:" &&
+    ["localhost", "127.0.0.1", "::1"].includes(url.hostname) &&
+    (url.port === "" || url.port === "11434")
+  );
+}
+
 @Injectable()
 export class ModelProviderService {
   getPresets() {
@@ -144,6 +194,10 @@ export class ModelProviderService {
       );
     }
 
+    if (this.shouldUseSharedGpuFallback(provider, resolved)) {
+      return this.callSharedGpuFallback(messages, options);
+    }
+
     return this.callOpenAICompatible(resolved, messages, options);
   }
 
@@ -194,6 +248,8 @@ export class ModelProviderService {
       );
     }
 
+    await this.assertSafeProviderBaseUrl(provider);
+
     const preset = providerPresets.find((item) => item.id === provider.preset);
     if (preset?.needsApiKey !== false && !provider.apiKey) {
       const providerLabel = preset?.label || "OpenAI-compatible provider";
@@ -212,7 +268,16 @@ export class ModelProviderService {
       body.max_tokens = options.maxOutputTokens;
     }
 
-    if (provider.jsonMode) {
+    if (options.jsonSchema && this.shouldUseJsonSchema(provider)) {
+      body.response_format = {
+        type: "json_schema",
+        json_schema: {
+          name: options.jsonSchema.name,
+          strict: true,
+          schema: options.jsonSchema.schema,
+        },
+      };
+    } else if (provider.jsonMode || options.jsonSchema) {
       body.response_format = { type: "json_object" };
     }
 
@@ -223,16 +288,23 @@ export class ModelProviderService {
       headers.authorization = `Bearer ${provider.apiKey}`;
     }
 
-    const response = await fetch(url, {
+    const response = await this.fetchWithTimeout(url, {
       method: "POST",
       headers,
       body: JSON.stringify(body),
     });
 
+    if (!response.ok && options.jsonSchema && body.response_format) {
+      return this.callOpenAICompatible(provider, messages, {
+        ...options,
+        jsonSchema: undefined,
+      });
+    }
+
     if (!response.ok) {
       const errorText = await response.text();
       throw new BadRequestException(
-        `Provider request failed: ${response.status} ${errorText.slice(0, 500)}`,
+        `Provider request failed: ${response.status} ${errorText.slice(0, MAX_ERROR_BODY_LENGTH)}`,
       );
     }
 
@@ -247,5 +319,184 @@ export class ModelProviderService {
     }
 
     return content;
+  }
+
+  private shouldUseJsonSchema(provider: ProviderConfigDto) {
+    if (provider.preset === "shared-gpu" || provider.preset === "ollama") {
+      return false;
+    }
+
+    const baseUrl = provider.baseUrl?.toLowerCase() || "";
+    return (
+      baseUrl.includes("api.openai.com") ||
+      baseUrl.includes("openai.azure.com") ||
+      process.env.ENABLE_OPENAI_COMPAT_JSON_SCHEMA === "true"
+    );
+  }
+
+  private shouldUseSharedGpuFallback(
+    originalProvider: ProviderConfigDto,
+    resolvedProvider: ProviderConfigDto,
+  ) {
+    return (
+      originalProvider.preset === "shared-gpu" &&
+      (!resolvedProvider.baseUrl || !resolvedProvider.model)
+    );
+  }
+
+  private async callSharedGpuFallback(
+    messages: ProviderMessage[],
+    options: ProviderChatOptions,
+  ) {
+    const prompt = this.buildSharedGpuFallbackPrompt(messages);
+    const maxLength = Math.max(
+      64,
+      Math.min(512, options.maxOutputTokens ?? 256),
+    );
+    const maxContextLength = Math.max(1024, Math.min(8192, prompt.length * 2));
+
+    const submitResponse = await this.fetchWithTimeout(
+      `${defaultSharedGpuFallback.baseUrl}/generate/text/async`,
+      {
+        method: "POST",
+        headers: {
+          "content-type": "application/json",
+          apikey: defaultSharedGpuFallback.apiKey,
+          "Client-Agent": "ai-novel-first-step:shared-fallback",
+        },
+        body: JSON.stringify({
+          prompt,
+          params: {
+            max_context_length: maxContextLength,
+            max_length: maxLength,
+          },
+          trusted_workers: false,
+          validated_backends: true,
+          slow_workers: true,
+        }),
+      },
+    );
+
+    if (!submitResponse.ok) {
+      const errorText = await submitResponse.text();
+      throw new BadRequestException(
+        `免费共享算力暂时不可用：${submitResponse.status} ${errorText.slice(0, 300)}`,
+      );
+    }
+
+    const queued = (await submitResponse.json()) as { id?: string };
+    if (!queued.id) {
+      throw new BadRequestException(
+        "免费共享算力提交成功，但没有返回任务 ID。",
+      );
+    }
+
+    for (let attempt = 0; attempt < 30; attempt += 1) {
+      await new Promise((resolve) => setTimeout(resolve, 2000));
+      const statusResponse = await this.fetchWithTimeout(
+        `${defaultSharedGpuFallback.baseUrl}/generate/text/status/${queued.id}`,
+        {
+          headers: {
+            "Client-Agent": "ai-novel-first-step:shared-fallback",
+          },
+        },
+      );
+
+      if (!statusResponse.ok) {
+        const errorText = await statusResponse.text();
+        throw new BadRequestException(
+          `免费共享算力查询失败：${statusResponse.status} ${errorText.slice(0, 300)}`,
+        );
+      }
+
+      const status = (await statusResponse.json()) as {
+        done?: boolean;
+        faulted?: boolean;
+        generations?: Array<{ text?: string; state?: string }>;
+      };
+      const text = status.generations?.find((item) => item.text)?.text?.trim();
+
+      if (text) {
+        return text;
+      }
+
+      if (status.faulted) {
+        throw new BadRequestException("免费共享算力任务失败。");
+      }
+
+      if (status.done) {
+        throw new BadRequestException(
+          "免费共享算力已完成任务，但没有返回文本内容。",
+        );
+      }
+    }
+
+    throw new BadRequestException("免费共享算力排队超时，请稍后重试。");
+  }
+
+  private buildSharedGpuFallbackPrompt(messages: ProviderMessage[]) {
+    return messages
+      .map(
+        (message) =>
+          `${message.role === "system" ? "[System]" : "[User]"}\n${message.content}`,
+      )
+      .join("\n\n");
+  }
+
+  private async assertSafeProviderBaseUrl(provider: ProviderConfigDto) {
+    if (!provider.baseUrl) {
+      return;
+    }
+
+    let url: URL;
+    try {
+      url = new URL(provider.baseUrl);
+    } catch {
+      throw new BadRequestException("Provider baseUrl must be a valid URL.");
+    }
+
+    if (isAllowedLocalOllama(provider, url)) {
+      return;
+    }
+
+    if (url.protocol !== "https:") {
+      throw new BadRequestException(
+        "Provider baseUrl must use https unless the Ollama preset is selected.",
+      );
+    }
+
+    const host = url.hostname;
+    if (["localhost", "127.0.0.1", "::1"].includes(host)) {
+      throw new BadRequestException(
+        "Provider baseUrl cannot point to localhost. Use the Ollama preset for local models.",
+      );
+    }
+
+    const addresses = isIP(host)
+      ? [{ address: host }]
+      : await lookup(host, { all: true, verbatim: true });
+    if (addresses.some((item) => isPrivateIpAddress(item.address))) {
+      throw new BadRequestException(
+        "Provider baseUrl cannot resolve to a private or link-local address.",
+      );
+    }
+  }
+
+  private async fetchWithTimeout(url: string, init: RequestInit) {
+    const controller = new AbortController();
+    const timeout = setTimeout(() => controller.abort(), providerTimeoutMs());
+    try {
+      return await fetch(url, {
+        ...init,
+        signal: controller.signal,
+      });
+    } catch (error) {
+      if (error instanceof Error && error.name === "AbortError") {
+        throw new BadRequestException("Provider request timed out.");
+      }
+      throw error;
+    } finally {
+      clearTimeout(timeout);
+    }
   }
 }

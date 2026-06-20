@@ -380,13 +380,48 @@ export interface BookAnalysisResult {
 	mapReduce?: {
 		strategy: string;
 		mapCount: number;
+		chunkCount?: number;
+		outlineCount?: number;
+		deepCount?: number;
+		deepTargetOrders?: number[];
 		chapterMaps: Array<{
+			chapterId: string;
+			order: number;
+			title: string;
+			chunkStartOffset?: number;
+			chunkEndOffset?: number;
+			splitBy?: "heading" | "auto-chunk";
+			summary: string;
+			plotFunction: string;
+			hook: string;
+			evidenceSnippets?: string[];
+			sourceAnchors?: Array<{
+				anchorId: string;
+				label: string;
+				quote: string;
+				startOffset: number;
+				endOffset: number;
+			}>;
+		}>;
+		chunkEvidenceIndex?: Array<{
 			chapterId: string;
 			order: number;
 			title: string;
 			summary: string;
 			plotFunction: string;
 			hook: string;
+			chunkStartOffset: number;
+			chunkEndOffset: number;
+			splitBy: "heading" | "auto-chunk";
+			keywords: string[];
+			evidenceSnippets: string[];
+			sourceAnchors: Array<{
+				anchorId: string;
+				label: string;
+				quote: string;
+				startOffset: number;
+				endOffset: number;
+			}>;
 		}>;
 		reducerNote: string;
 	};
@@ -435,8 +470,11 @@ export interface BookAnalysisJob {
 		mapCount: number;
 		totalChapters: number;
 		artifactDir: string;
-		chapterMaps: unknown[];
 		notice: string;
+		analysisStrategy?: string;
+		outlineCount?: number;
+		deepTargetOrders?: number[];
+		deepCompletedCount?: number;
 	};
 	result?: BookAnalysisResult;
 	error?: string;
@@ -554,7 +592,37 @@ export interface ResearchQaResult {
 	}>;
 }
 
-interface WorkspaceStoreState {
+export interface CachedQuickReview {
+	key: string;
+	updatedAt: string;
+	title: string;
+	genre: string;
+	result: QuickReviewResult;
+}
+
+export interface CachedRubricResult {
+	key: string;
+	updatedAt: string;
+	referenceTitle: string;
+	result: RubricResult;
+}
+
+export interface CachedScoreResult {
+	key: string;
+	updatedAt: string;
+	chapterTitle: string;
+	result: ScoreResult;
+}
+
+export interface CachedBookAnalysis {
+	key: string;
+	updatedAt: string;
+	bookTitle: string;
+	job: BookAnalysisJob;
+	result: BookAnalysisResult | null;
+}
+
+export interface WorkspaceStoreState {
 	provider: ProviderForm;
 	referenceTitle: string;
 	genre: string;
@@ -591,6 +659,7 @@ interface WorkspaceStoreState {
 	referenceFileName: string;
 	chapterTitle: string;
 	chapterText: string;
+	quickReviewGenre: string;
 	rubricResult: RubricResult | null;
 	scoreResult: ScoreResult | null;
 	quickReviewResult: QuickReviewResult | null;
@@ -611,6 +680,10 @@ interface WorkspaceStoreState {
 	researchComparison: ResearchComparisonResult | null;
 	researchQuestion: string;
 	researchQaResult: ResearchQaResult | null;
+	quickReviewCache: CachedQuickReview[];
+	rubricCache: CachedRubricResult[];
+	scoreCache: CachedScoreResult[];
+	bookAnalysisCache: CachedBookAnalysis[];
 }
 
 interface WorkspaceStoreActions {
@@ -650,6 +723,7 @@ interface WorkspaceStoreActions {
 	setReferenceFileName: StoreSetter<string>;
 	setChapterTitle: StoreSetter<string>;
 	setChapterText: StoreSetter<string>;
+	setQuickReviewGenre: StoreSetter<string>;
 	setRubricResult: StoreSetter<RubricResult | null>;
 	setScoreResult: StoreSetter<ScoreResult | null>;
 	setQuickReviewResult: StoreSetter<QuickReviewResult | null>;
@@ -670,6 +744,10 @@ interface WorkspaceStoreActions {
 	setResearchComparison: StoreSetter<ResearchComparisonResult | null>;
 	setResearchQuestion: StoreSetter<string>;
 	setResearchQaResult: StoreSetter<ResearchQaResult | null>;
+	setQuickReviewCache: StoreSetter<CachedQuickReview[]>;
+	setRubricCache: StoreSetter<CachedRubricResult[]>;
+	setScoreCache: StoreSetter<CachedScoreResult[]>;
+	setBookAnalysisCache: StoreSetter<CachedBookAnalysis[]>;
 }
 
 export type WorkspaceStore = WorkspaceStoreState & WorkspaceStoreActions;
@@ -711,6 +789,7 @@ const initialWorkspaceState: WorkspaceStoreState = {
 	referenceFileName: "",
 	chapterTitle: "",
 	chapterText: "",
+	quickReviewGenre: "",
 	rubricResult: null,
 	scoreResult: null,
 	quickReviewResult: null,
@@ -731,12 +810,148 @@ const initialWorkspaceState: WorkspaceStoreState = {
 	researchComparison: null,
 	researchQuestion: "",
 	researchQaResult: null,
+	quickReviewCache: [],
+	rubricCache: [],
+	scoreCache: [],
+	bookAnalysisCache: [],
 };
 
 const localSettingsStorageKey = "ai-novel-first-step-local-settings";
 
+const persistableWorkspaceKeys = [
+	"provider",
+	"referenceTitle",
+	"genre",
+	"platform",
+	"audience",
+	"readingMode",
+	"category",
+	"theme",
+	"tags",
+	"explicitKeywords",
+	"implicitExpectations",
+	"positioningPromise",
+	"recommendationSignals",
+	"competitionLevel",
+	"competitionNotes",
+	"pushStage",
+	"trafficEntry",
+	"impressions",
+	"clickThroughRate",
+	"validReadRate",
+	"read30sRate",
+	"read60sRate",
+	"bottomRate",
+	"followRate",
+	"bookshelfRate",
+	"firstChapterCompletionRate",
+	"nextChapterClickRate",
+	"threeChapterRetentionRate",
+	"avgReadProgressRate",
+	"paidUnlockRate",
+	"aiSelfTestEnabled",
+	"enabledAiSelfTests",
+	"referenceText",
+	"referenceFileName",
+	"chapterTitle",
+	"chapterText",
+	"quickReviewGenre",
+	"rubricResult",
+	"scoreResult",
+	"quickReviewResult",
+	"referenceProfileProgress",
+	"scoreProgress",
+	"bookTitle",
+	"bookGenre",
+	"bookJob",
+	"selectedResearchJobIds",
+	"comparisonFocus",
+	"researchQuestion",
+	"quickReviewCache",
+	"rubricCache",
+	"scoreCache",
+	"bookAnalysisCache",
+] as const satisfies Array<keyof WorkspaceStoreState>;
+
+type PersistedWorkspaceState = Pick<WorkspaceStoreState, (typeof persistableWorkspaceKeys)[number]>;
+
+function toPersistedBookJob(job: BookAnalysisJob | null): BookAnalysisJob | null {
+	if (!job) {
+		return null;
+	}
+
+	return {
+		id: job.id,
+		type: job.type,
+		status: job.status,
+		inputSummary: { ...job.inputSummary },
+		progress: { ...job.progress },
+		partialResult: job.partialResult ? { ...job.partialResult } : undefined,
+		error: job.error,
+		uploadId: job.uploadId,
+	};
+}
+
+export function partializeWorkspaceState(state: WorkspaceStoreState): PersistedWorkspaceState {
+	return persistableWorkspaceKeys.reduce((result, key) => {
+		if (key === "bookJob") {
+			result.bookJob = toPersistedBookJob(
+				state.bookJob,
+			) as PersistedWorkspaceState["bookJob"];
+			return result;
+		}
+
+		if (key === "bookAnalysisCache") {
+			result.bookAnalysisCache = state.bookAnalysisCache.map((entry) => ({
+				...entry,
+				job: toPersistedBookJob(entry.job) ?? entry.job,
+				result: null,
+			})) as PersistedWorkspaceState["bookAnalysisCache"];
+			return result;
+		}
+
+		result[key] = state[key] as never;
+		return result;
+	}, {} as PersistedWorkspaceState);
+}
+
+export function mergeWorkspaceState(
+	persistedState: unknown,
+	currentState: WorkspaceStore,
+): WorkspaceStore {
+	const persisted =
+		persistedState && typeof persistedState === "object"
+			? (persistedState as Partial<WorkspaceStoreState>)
+			: {};
+	const persistedProvider = persisted.provider;
+	const allowedPresets: ProviderPresetId[] = [
+		"custom",
+		"shared-gpu",
+		"deepseek",
+		"doubao",
+		"qwen",
+		"ollama",
+	];
+	const safeProvider =
+		persistedProvider && allowedPresets.includes(persistedProvider.preset)
+			? persistedProvider
+			: currentState.provider;
+
+	return {
+		...currentState,
+		...persisted,
+		provider: safeProvider
+			? {
+					...currentState.provider,
+					...safeProvider,
+				}
+			: currentState.provider,
+		bookFile: null,
+	};
+}
+
 export const useWorkspaceStore = create<WorkspaceStore>()(
-	persist(
+	persist<WorkspaceStore, [], [], PersistedWorkspaceState>(
 		(set) => {
 			function makeSetter<K extends keyof WorkspaceStoreState>(
 				key: K,
@@ -785,6 +1000,7 @@ export const useWorkspaceStore = create<WorkspaceStore>()(
 				setReferenceFileName: makeSetter("referenceFileName"),
 				setChapterTitle: makeSetter("chapterTitle"),
 				setChapterText: makeSetter("chapterText"),
+				setQuickReviewGenre: makeSetter("quickReviewGenre"),
 				setRubricResult: makeSetter("rubricResult"),
 				setScoreResult: makeSetter("scoreResult"),
 				setQuickReviewResult: makeSetter("quickReviewResult"),
@@ -805,38 +1021,18 @@ export const useWorkspaceStore = create<WorkspaceStore>()(
 				setResearchComparison: makeSetter("researchComparison"),
 				setResearchQuestion: makeSetter("researchQuestion"),
 				setResearchQaResult: makeSetter("researchQaResult"),
+				setQuickReviewCache: makeSetter("quickReviewCache"),
+				setRubricCache: makeSetter("rubricCache"),
+				setScoreCache: makeSetter("scoreCache"),
+				setBookAnalysisCache: makeSetter("bookAnalysisCache"),
 			};
 		},
 		{
 			name: localSettingsStorageKey,
-			version: 1,
+			version: 2,
 			storage: createJSONStorage(() => localStorage),
-			partialize: (state) => ({ provider: state.provider }),
-			merge: (persistedState, currentState) => {
-				const persistedProvider = (persistedState as Partial<WorkspaceStoreState>).provider;
-				const allowedPresets: ProviderPresetId[] = [
-					"custom",
-					"shared-gpu",
-					"deepseek",
-					"doubao",
-					"qwen",
-					"ollama",
-				];
-				const safeProvider =
-					persistedProvider && allowedPresets.includes(persistedProvider.preset)
-						? persistedProvider
-						: currentState.provider;
-
-				return {
-					...currentState,
-					provider: safeProvider
-						? {
-								...currentState.provider,
-								...safeProvider,
-							}
-						: currentState.provider,
-				};
-			},
+			partialize: partializeWorkspaceState,
+			merge: mergeWorkspaceState,
 		},
 	),
 );

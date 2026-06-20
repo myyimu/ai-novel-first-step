@@ -1,10 +1,11 @@
 import {
+  BadRequestException,
   Injectable,
   Logger,
   NotFoundException,
   type OnModuleInit,
 } from "@nestjs/common";
-import { mkdir, readdir, readFile, writeFile } from "node:fs/promises";
+import { mkdir, readdir, readFile, rm, writeFile } from "node:fs/promises";
 import { join } from "node:path";
 import { AnalysisPersistenceRepository } from "./analysis-persistence.repository";
 import { BookPreprocessResult } from "./text-preprocessor.service";
@@ -30,8 +31,11 @@ export interface BookAnalysisPartialResult {
   mapCount: number;
   totalChapters: number;
   artifactDir: string;
-  chapterMaps: unknown[];
   notice: string;
+  analysisStrategy?: string;
+  outlineCount?: number;
+  deepTargetOrders?: number[];
+  deepCompletedCount?: number;
 }
 
 export interface BookAnalysisJobSnapshot {
@@ -96,7 +100,7 @@ export class BookAnalysisJobService implements OnModuleInit {
         stage: "queued",
         current: 0,
         total: 1,
-        message: "任务已进入本地内存队列。",
+        message: "Job has been queued.",
       },
       uploadId,
     };
@@ -112,18 +116,49 @@ export class BookAnalysisJobService implements OnModuleInit {
     return this.snapshot(job);
   }
 
-  async get(jobId: string): Promise<BookAnalysisJobSnapshot> {
+  async get(
+    jobId: string,
+    options?: { includeResult?: boolean },
+  ): Promise<BookAnalysisJobSnapshot> {
     const inMemory = this.jobs.get(jobId);
     if (inMemory) {
-      return this.snapshot(inMemory);
+      return this.snapshot(inMemory, options);
     }
 
-    const persisted = await this.repository.getJob(jobId);
+    const persisted = await this.repository.getJob(jobId, options);
     if (!persisted) {
       throw new NotFoundException(`Book analysis job not found: ${jobId}`);
     }
 
     return persisted;
+  }
+
+  async delete(jobId: string) {
+    const job = await this.get(jobId, { includeResult: false });
+    if (job.status === "queued" || job.status === "running") {
+      throw new BadRequestException(
+        "Running book analysis jobs cannot be deleted.",
+      );
+    }
+
+    const deleted = await this.repository.deleteJob(jobId);
+    if (!deleted) {
+      throw new NotFoundException(`Book analysis job not found: ${jobId}`);
+    }
+
+    this.jobs.delete(jobId);
+    await Promise.all([
+      rm(join(this.artifactRoot, jobId), { recursive: true, force: true }),
+      rm(join(this.storageRoot, "jobs", jobId), {
+        recursive: true,
+        force: true,
+      }),
+    ]);
+
+    return {
+      deleted: true as const,
+      jobId,
+    };
   }
 
   async resume(
@@ -132,7 +167,9 @@ export class BookAnalysisJobService implements OnModuleInit {
   ): Promise<BookAnalysisJobSnapshot> {
     let job = this.jobs.get(jobId);
     if (!job) {
-      const persisted = await this.repository.getJob(jobId);
+      const persisted = await this.repository.getJob(jobId, {
+        includeResult: true,
+      });
       if (!persisted) {
         throw new NotFoundException(`Book analysis job not found: ${jobId}`);
       }
@@ -151,11 +188,17 @@ export class BookAnalysisJobService implements OnModuleInit {
     job.updatedAt = now;
     job.progress = {
       stage: "queued",
-      current: job.partialResult?.mapCount ?? 0,
-      total: job.partialResult?.totalChapters ?? 1,
+      current:
+        job.partialResult?.deepCompletedCount ??
+        job.partialResult?.mapCount ??
+        0,
+      total:
+        job.partialResult?.deepTargetOrders?.length ||
+        job.partialResult?.totalChapters ||
+        1,
       message: job.partialResult
-        ? `已找到 ${job.partialResult.mapCount}/${job.partialResult.totalChapters} 个已完成章节，准备继续。`
-        : "任务已重新进入本地内存队列。",
+        ? "Found previous partial progress and queued it for resume."
+        : "Job has been re-queued.",
     };
     await this.repository.updateJob(jobId, {
       status: job.status,
@@ -210,13 +253,17 @@ export class BookAnalysisJobService implements OnModuleInit {
   async recordChapterMap(input: {
     jobId: string;
     chapterMap: unknown;
-    chapterMaps: unknown[];
+    mapCount: number;
     totalChapters: number;
+    analysisStrategy?: string;
+    outlineCount?: number;
+    deepTargetOrders?: number[];
+    deepCompletedCount?: number;
+    phase?: "outline" | "deep";
   }) {
     const job = this.read(input.jobId);
-    const mapCount = input.chapterMaps.length;
     const artifactDir = join(this.artifactRoot, input.jobId);
-    const mapId = this.chapterMapFileId(input.chapterMap, mapCount);
+    const mapId = this.chapterMapFileId(input.chapterMap, input.mapCount);
     await mkdir(artifactDir, { recursive: true });
     await writeFile(
       join(artifactDir, `map-${mapId}.json`),
@@ -225,23 +272,59 @@ export class BookAnalysisJobService implements OnModuleInit {
     );
 
     const now = new Date().toISOString();
+    const mapCount = input.mapCount;
     job.partialResult = {
       partial: true,
       type: "book-map-reduce-partial",
       stage: "map",
       savedAt: now,
-      mapCount,
+      mapCount: input.mapCount,
       totalChapters: input.totalChapters,
       artifactDir,
-      chapterMaps: input.chapterMaps,
-      notice: `已完成 ${mapCount}/${input.totalChapters} 个章节片段；如果任务失败，可从第 ${Math.min(
-        mapCount + 1,
-        input.totalChapters,
-      )} 章继续。`,
+      notice:
+        input.phase === "deep"
+          ? `Deep analysis ${input.deepCompletedCount || 0}/${input.deepTargetOrders?.length || 0} completed.`
+          : `Outline index ${mapCount}/${input.totalChapters} completed.`,
+      analysisStrategy: input.analysisStrategy,
+      outlineCount: input.outlineCount,
+      deepTargetOrders: input.deepTargetOrders,
+      deepCompletedCount: input.deepCompletedCount,
     };
     job.updatedAt = now;
     await this.repository.updateJob(input.jobId, {
       partialResult: job.partialResult,
+    });
+  }
+
+  async updatePartialPlan(
+    input: Pick<
+      BookAnalysisPartialResult,
+      | "analysisStrategy"
+      | "outlineCount"
+      | "deepTargetOrders"
+      | "deepCompletedCount"
+    > & { jobId: string },
+  ) {
+    const job = this.read(input.jobId);
+    if (!job.partialResult) {
+      return;
+    }
+
+    const nextPartial: BookAnalysisPartialResult = {
+      ...job.partialResult,
+      savedAt: new Date().toISOString(),
+      analysisStrategy:
+        input.analysisStrategy ?? job.partialResult.analysisStrategy,
+      outlineCount: input.outlineCount ?? job.partialResult.outlineCount,
+      deepTargetOrders:
+        input.deepTargetOrders ?? job.partialResult.deepTargetOrders,
+      deepCompletedCount:
+        input.deepCompletedCount ?? job.partialResult.deepCompletedCount,
+    };
+    job.partialResult = nextPartial;
+    job.updatedAt = nextPartial.savedAt;
+    await this.repository.updateJob(input.jobId, {
+      partialResult: nextPartial,
     });
   }
 
@@ -287,7 +370,7 @@ export class BookAnalysisJobService implements OnModuleInit {
       stage: "succeeded",
       current: job.progress.total,
       total: job.progress.total,
-      message: "整书 map-reduce 拆解完成。",
+      message: "Book analysis completed.",
     };
     await this.repository.updateJob(jobId, {
       status: job.status,
@@ -295,6 +378,7 @@ export class BookAnalysisJobService implements OnModuleInit {
       result,
       finishedAt: now,
     });
+    this.jobs.delete(jobId);
   }
 
   async fail(jobId: string, error: unknown) {
@@ -324,6 +408,7 @@ export class BookAnalysisJobService implements OnModuleInit {
       error: job.error,
       finishedAt: now,
     });
+    this.jobs.delete(jobId);
     this.logger.warn(`Book analysis job failed: ${jobId} ${job.error}`);
   }
 
@@ -336,11 +421,31 @@ export class BookAnalysisJobService implements OnModuleInit {
     return job;
   }
 
-  private snapshot(job: StoredBookAnalysisJob): BookAnalysisJobSnapshot {
+  private snapshot(
+    job: StoredBookAnalysisJob,
+    options?: { includeResult?: boolean },
+  ): BookAnalysisJobSnapshot {
     return {
       ...job,
       progress: { ...job.progress },
       inputSummary: { ...job.inputSummary },
+      result: options?.includeResult === false ? undefined : job.result,
+      partialResult: job.partialResult
+        ? {
+            partial: job.partialResult.partial,
+            type: job.partialResult.type,
+            stage: job.partialResult.stage,
+            savedAt: job.partialResult.savedAt,
+            mapCount: job.partialResult.mapCount,
+            totalChapters: job.partialResult.totalChapters,
+            artifactDir: job.partialResult.artifactDir,
+            notice: job.partialResult.notice,
+            analysisStrategy: job.partialResult.analysisStrategy,
+            outlineCount: job.partialResult.outlineCount,
+            deepTargetOrders: job.partialResult.deepTargetOrders,
+            deepCompletedCount: job.partialResult.deepCompletedCount,
+          }
+        : undefined,
     };
   }
 

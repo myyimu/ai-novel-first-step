@@ -31,7 +31,7 @@ function getStatusMeta(status: string, loading: boolean) {
 		return {
 			title: "状态",
 			icon: CheckCircle2,
-			className: "border-emerald-500/30 bg-emerald-500/10 text-emerald-300",
+			className: "border-success-border bg-success-surface text-success-foreground",
 			iconClassName: "",
 		};
 	}
@@ -47,7 +47,7 @@ function getStatusMeta(status: string, loading: boolean) {
 		return {
 			title: "需要处理",
 			icon: TriangleAlert,
-			className: "border-amber-500/30 bg-amber-500/10 text-amber-300",
+			className: "border-warning-border bg-warning-surface text-warning-foreground",
 			iconClassName: "",
 		};
 	}

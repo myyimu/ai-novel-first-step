@@ -11,7 +11,7 @@ const transport = pino.transport({
       options: {
         colorize: true,
         levelFirst: true,
-        translateTime: "yyyy-mm-dd HH:MM:ss",
+        translateTime: "SYS:yyyy-mm-dd HH:MM:ss o",
         messageFormat: "{level} {msg}",
       },
     },

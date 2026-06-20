@@ -21,4 +21,36 @@ describe("extractJson", () => {
       ok: true,
     });
   });
+
+  it("repairs common JSON issues like trailing commas", () => {
+    expect(extractJson('{"scores":[{"score":7},],"ok":true,}')).toEqual({
+      scores: [{ score: 7 }],
+      ok: true,
+    });
+  });
+
+  it("repairs missing commas between array objects", () => {
+    expect(extractJson('{"items":[{"name":"a"}\n{"name":"b"}]}')).toEqual({
+      items: [{ name: "a" }, { name: "b" }],
+    });
+  });
+
+  it("repairs missing commas between array strings", () => {
+    expect(extractJson('{"fixes":["补足互动"\n"前置卖点"]}')).toEqual({
+      fixes: ["补足互动", "前置卖点"],
+    });
+  });
+
+  it("repairs repeated parser-position comma failures", () => {
+    expect(
+      extractJson(
+        '{"principles":[{"id":"p1","rules":["a" "b"]} {"id":"p2","rules":["c" "d"]}]}',
+      ),
+    ).toEqual({
+      principles: [
+        { id: "p1", rules: ["a", "b"] },
+        { id: "p2", rules: ["c", "d"] },
+      ],
+    });
+  });
 });

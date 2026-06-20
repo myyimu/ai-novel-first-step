@@ -17,6 +17,13 @@ spec:
       containers:
         - name: web
           image: web:latest
+          env:
+            - name: NODE_ENV
+              value: production
+            - name: NEXT_PUBLIC_API_BASE_URL
+              value: /api/v1
+            - name: API_INTERNAL_BASE_URL
+              value: http://api:3001/api/v1
           ports:
             - containerPort: 3000
               protocol: TCP

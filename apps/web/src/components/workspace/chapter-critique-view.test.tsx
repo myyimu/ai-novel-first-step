@@ -8,16 +8,24 @@ const baseProps = {
 	quickLoading: false,
 	quickElapsedSeconds: 0,
 	quickReviewResult: null,
+	quickReviewGenre: "",
 	importReferenceFile: vi.fn(),
 	onInferReferenceProfile: vi.fn(),
 	onReferenceTextChange: vi.fn(),
+	onQuickReviewGenreChange: vi.fn(),
 	onRunQuickExperience: vi.fn(),
+	onRerunQuickExperience: vi.fn(),
+	hasQuickReviewCache: false,
 	onUseExampleChapter: vi.fn(),
 	onUseExampleReference: vi.fn(),
 	onOpenModel: vi.fn(),
 	onOpenBook: vi.fn(),
 	onBuildRubric: vi.fn(),
+	onRebuildRubric: vi.fn(),
 	onScoreChapter: vi.fn(),
+	onRescoreChapter: vi.fn(),
+	hasRubricCache: false,
+	hasScoreCache: false,
 	onPlatformStrategyChange: vi.fn(),
 	onChapterDraftChange: vi.fn(),
 };
@@ -26,7 +34,8 @@ describe("ChapterCritiqueView", () => {
 	it("renders the chapter critique workflow from workspace store state", () => {
 		const html = renderToStaticMarkup(<ChapterCritiqueView {...baseProps} />);
 
-		expect(html).toContain("快速点评");
+		expect(html).toContain("30 秒章节急诊");
+		expect(html).toContain("高级质检：样本、评分标准和证据链");
 		expect(html).toContain("平台风格画像");
 		expect(html).toContain("导入成熟章节");
 		expect(html).toContain("AI 识别的市场定位");

@@ -29,9 +29,10 @@
     "test:coverage": "vitest run --coverage",
     "lint": "oxlint .",
     "lint:fix": "oxlint --fix .",
+    "typecheck": "tsc --noEmit --project tsconfig.json",
     "format": "oxfmt --check package.json tsconfig.json tsdown.config.ts vitest.config.ts src",
     "format:fix": "oxfmt --write package.json tsconfig.json tsdown.config.ts vitest.config.ts src",
-    "check": "pnpm run lint && pnpm run format",
+    "check": "pnpm run lint && pnpm run typecheck && pnpm run format",
     "check:fix": "pnpm run lint:fix && pnpm run format:fix",
     "prepublishOnly": "pnpm run check && pnpm run test && pnpm run build",
     "publish:public": "pnpm publish --access public"

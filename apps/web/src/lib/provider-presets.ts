@@ -18,7 +18,7 @@ export const providerPresets: Record<ProviderPresetId, ProviderPreset> = {
 		modelOptions: [],
 		jsonMode: false,
 		needsApiKey: false,
-		notice: "免费线路由服务器统一提供，可能排队、变慢、失败、可分析字数变少或输出质量波动；不建议上传未授权原文、隐私内容或商业机密。",
+		notice: "默认可直接使用。若服务端未配置专用共享线路，系统会自动回退到匿名公共共享池；可能排队、变慢、失败、可分析字数变少或输出质量波动，不建议上传未授权原文、隐私内容或商业机密。",
 	},
 	deepseek: {
 		label: "DeepSeek",

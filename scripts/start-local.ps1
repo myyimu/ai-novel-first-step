@@ -26,8 +26,140 @@ $PgliteDir = Join-Path $RootPath ".local/pglite-runtime"
 New-Item -ItemType Directory -Force -Path $LogsDir | Out-Null
 New-Item -ItemType Directory -Force -Path $PgliteDir | Out-Null
 
+$checkEnvScript = Join-Path $PSScriptRoot "check-env.ps1"
+if ($env:START_LOCAL_ENV_CHECKED -ne "1" -and (Test-Path $checkEnvScript)) {
+	& $checkEnvScript -AutoInstall
+	if ($LASTEXITCODE -ne 0) {
+		Write-Error "Environment check failed. Resolve Node.js/pnpm dependencies first."
+	}
+}
+
 function Test-Command($Name) {
 	return [bool](Get-Command $Name -ErrorAction SilentlyContinue)
+}
+
+function Get-PnpmCommand {
+	if (Test-Command "pnpm") {
+		return "pnpm"
+	}
+
+	if (Test-Command "corepack") {
+		try {
+			$null = corepack pnpm --version 2>$null
+			if ($LASTEXITCODE -eq 0) {
+				return "corepack pnpm"
+			}
+		}
+		catch {
+			return $null
+		}
+	}
+
+	return $null
+}
+
+function Test-PathExists($Path) {
+	return Test-Path -LiteralPath $Path
+}
+
+function Test-WorkspaceDependenciesInstalled {
+	if (-not (Test-PathExists (Join-Path $RootPath "node_modules"))) {
+		return @{
+			Ok      = $false
+			Message = "Workspace root node_modules is missing."
+		}
+	}
+
+	$checks = @(
+		@{ Dir = $ApiDir; Command = "$script:PnpmCommand exec nest --version" },
+		@{ Dir = $WebDir; Command = "$script:PnpmCommand exec next --version" }
+	)
+
+	foreach ($check in $checks) {
+		$tempOutputPath = Join-Path $LogsDir ("dependency-check-" + [System.Guid]::NewGuid().ToString("N") + ".out.log")
+		$tempErrorPath = Join-Path $LogsDir ("dependency-check-" + [System.Guid]::NewGuid().ToString("N") + ".err.log")
+		try {
+			$result = Start-Process -FilePath "powershell.exe" `
+				-ArgumentList @("-NoProfile", "-ExecutionPolicy", "Bypass", "-Command", $check.Command) `
+				-WorkingDirectory $check.Dir `
+				-WindowStyle Hidden `
+				-RedirectStandardOutput $tempOutputPath `
+				-RedirectStandardError $tempErrorPath `
+				-Wait `
+				-PassThru
+			if ($result.ExitCode -ne 0) {
+				$messageParts = @()
+				if (Test-PathExists $tempOutputPath) {
+					$stdoutContent = (Get-Content $tempOutputPath -Raw -ErrorAction SilentlyContinue).Trim()
+					if (-not [string]::IsNullOrWhiteSpace($stdoutContent)) {
+						$messageParts += $stdoutContent
+					}
+				}
+				if (Test-PathExists $tempErrorPath) {
+					$stderrContent = (Get-Content $tempErrorPath -Raw -ErrorAction SilentlyContinue).Trim()
+					if (-not [string]::IsNullOrWhiteSpace($stderrContent)) {
+						$messageParts += $stderrContent
+					}
+				}
+				$message = if ($messageParts.Count -gt 0) {
+					$messageParts -join [Environment]::NewLine
+				} else {
+					"Command failed: $($check.Command)"
+				}
+				return @{
+					Ok      = $false
+					Message = $message
+				}
+			}
+		}
+		finally {
+			if (Test-PathExists $tempOutputPath) {
+				Remove-Item -LiteralPath $tempOutputPath -Force -ErrorAction SilentlyContinue
+			}
+			if (Test-PathExists $tempErrorPath) {
+				Remove-Item -LiteralPath $tempErrorPath -Force -ErrorAction SilentlyContinue
+			}
+		}
+	}
+
+	return @{
+		Ok      = $true
+		Message = ""
+	}
+}
+
+function Ensure-WorkspaceDependencies {
+	$dependencyStatus = Test-WorkspaceDependenciesInstalled
+	if ($dependencyStatus.Ok) {
+		Write-Host "Workspace dependencies already installed"
+		return
+	}
+
+	Write-Host "Workspace dependencies missing; running pnpm install..."
+	Push-Location $RootPath
+	try {
+		if ($script:PnpmCommand -eq "pnpm") {
+			& pnpm install
+		}
+		else {
+			& corepack pnpm install
+		}
+		if ($LASTEXITCODE -ne 0) {
+			Write-Error "pnpm install failed. Fix dependency installation errors and rerun the script."
+		}
+	}
+	finally {
+		Pop-Location
+	}
+
+	$dependencyStatus = Test-WorkspaceDependenciesInstalled
+	if (-not $dependencyStatus.Ok) {
+		if (-not [string]::IsNullOrWhiteSpace($dependencyStatus.Message)) {
+			Write-Host "Dependency verification failed:" -ForegroundColor Yellow
+			Write-Host $dependencyStatus.Message -ForegroundColor Yellow
+		}
+		Write-Error "Dependencies or runtime requirements are still incomplete after pnpm install. Check the message above and rerun."
+	}
 }
 
 function Get-ListeningConnections($Port) {
@@ -254,9 +386,12 @@ function Start-DevProcess($Name, $WorkingDirectory, $Command) {
 		-WindowStyle Normal
 }
 
-if (-not (Test-Command "pnpm.cmd")) {
-	Write-Error "pnpm.cmd not found. Install pnpm first, then rerun this script."
+$script:PnpmCommand = Get-PnpmCommand
+if (-not $script:PnpmCommand) {
+	Write-Error "pnpm not found even after environment check. Reopen the terminal and run the script again."
 }
+
+Ensure-WorkspaceDependencies
 
 $apiSelection = Resolve-ServicePort $ApiPort "api"
 $ApiPort = [int]$apiSelection.Port
@@ -303,23 +438,33 @@ function Write-Utf8LogLine {
 '@
 
 if (-not $apiSelection.Reuse) {
+	$apiPnpmCommand = if ($script:PnpmCommand -eq "pnpm") {
+		"pnpm run start:dev"
+	} else {
+		"corepack pnpm run start:dev"
+	}
 	$ApiCommand = @"
 ${ChildEncodingSetup}
 `$env:PORT="$ApiPort"
 `$env:ALLOWED_ORIGINS="$AllowedOrigins"
 `$env:PGLITE_DATA_DIR="$PgliteDir"
 `$LogFile="$ApiLog"
-pnpm run start:dev 2>&1 | ForEach-Object { Write-Utf8LogLine `$LogFile `$_ }
+$apiPnpmCommand 2>&1 | ForEach-Object { Write-Utf8LogLine `$LogFile `$_ }
 "@
 	Start-DevProcess "API on http://127.0.0.1:$ApiPort" $ApiDir $ApiCommand
 }
 
 if (-not $webSelection.Reuse) {
+	$webPnpmCommand = if ($script:PnpmCommand -eq "pnpm") {
+		"pnpm run dev --hostname 127.0.0.1 --port $WebPort"
+	} else {
+		"corepack pnpm run dev --hostname 127.0.0.1 --port $WebPort"
+	}
 	$WebCommand = @"
 ${ChildEncodingSetup}
 `$env:NEXT_PUBLIC_API_BASE_URL="$ApiBaseUrl"
 `$LogFile="$WebLog"
-pnpm run dev --hostname 127.0.0.1 --port $WebPort 2>&1 | ForEach-Object { Write-Utf8LogLine `$LogFile `$_ }
+$webPnpmCommand 2>&1 | ForEach-Object { Write-Utf8LogLine `$LogFile `$_ }
 "@
 	Start-DevProcess "Web on http://127.0.0.1:$WebPort" $WebDir $WebCommand
 }

@@ -3,16 +3,12 @@
 import {
 	BookOpenCheck,
 	CheckCircle2,
-	Download,
 	FileText,
-	History,
 	KeyRound,
-	LayoutDashboard,
 	Loader2,
 	Network,
-	Settings,
 	ShieldAlert,
-	Sparkles,
+	Trash2,
 } from "lucide-react";
 import { useRouter } from "next/navigation";
 import { type ChangeEvent, useEffect, useMemo, useRef, useState } from "react";
@@ -29,7 +25,7 @@ import {
 import { LibraryView } from "@/components/workspace/library-view";
 import { OverviewView } from "@/components/workspace/overview-view";
 import { StarterView } from "@/components/workspace/starter-view";
-import { WorkspaceShell, type WorkspaceNavItem } from "@/components/workspace/workspace-shell";
+import { WorkspaceShell } from "@/components/workspace/workspace-shell";
 import {
 	buildBeginnerLearningDigest,
 	buildComparisonSamples,
@@ -37,19 +33,62 @@ import {
 	buildResearchPromptSeed,
 	buildScoreEvidenceChain,
 } from "@/lib/research-library";
+import { apiUrl, type ApiEnvelope } from "@/lib/api-client";
 import { providerPresets } from "@/lib/provider-presets";
+import { toQuickReviewErrorMessage } from "@/lib/quick-review-errors";
+import {
+	askResearchLibrary as requestResearchQa,
+	compactReferenceText,
+	compareResearchBooks,
+	createBookAnalysisJobFromUpload,
+	deleteBookAnalysisJob,
+	listBookHistory,
+	parseList,
+	readBookAnalysisJob,
+	readResearchLibrary,
+	requestQuickReview,
+	requestReferenceProfile,
+	requestRubric,
+	requestScoreChapter,
+	resumeBookAnalysisJob,
+	testProviderConnection,
+	uploadBookPreview,
+	type ReferenceProfileResult,
+} from "@/lib/workspace-analysis-client";
+import {
+	buildReferenceProfileFacts,
+	useReferenceProfileProgressController,
+	useScoreProgressController,
+} from "@/lib/workspace-progress";
+import {
+	buildBookWorkspaceSummary,
+	buildChapterWorkspaceSummary,
+	buildOverviewNextAction,
+	buildResearchWorkspaceSummary,
+	getPerformanceSnapshotNote,
+	getWorkspaceNavItems,
+	getWorkspaceViewMeta,
+} from "@/lib/workspace-view-model";
+import {
+	buildBookAnalysisCacheKey as createBookAnalysisCacheKey,
+	buildQuickReviewCacheKey as createQuickReviewCacheKey,
+	buildReferenceProfileCacheKey as createReferenceProfileCacheKey,
+	buildRubricCacheKey as createRubricCacheKey,
+	buildScoreCacheKey as createScoreCacheKey,
+	createBookAnalysisCacheEntry,
+	createQuickReviewCacheEntry,
+	createRubricCacheEntry,
+	createScoreCacheEntry,
+	updateCachedBookAnalysisByJobId,
+	upsertCacheEntry,
+} from "@/lib/workspace-cache";
 import { type WorkspaceView, workspaceViewRoutes } from "@/lib/workspace-routes";
 import {
+	type BookAnalysisResult,
 	type BookAnalysisJob,
 	type BookUploadPreview,
-	type PersistedResearchLibrary,
 	type ProviderKind,
 	type ProviderPresetId,
-	type ReferenceProfileProgressStepId,
-	type ReferenceProfileProgressItem,
-	type ResearchComparisonResult,
-	type ResearchQaResult,
-	type RubricMetric,
 	type RubricResult,
 	type QuickReviewResult,
 	type ScoreResult,
@@ -59,12 +98,6 @@ import {
 	defaultUserText,
 	useWorkspaceStore,
 } from "@/stores/workspace-store";
-
-interface ApiEnvelope<T> {
-	code: number;
-	message: string;
-	data: T;
-}
 
 type LoadingState =
 	| "provider"
@@ -81,37 +114,17 @@ type LoadingState =
 	| "export"
 	| null;
 
-interface ReferenceProfileResult {
-	mode: string;
-	referenceTitle: string;
-	genre: string;
-	category: string;
-	theme: string;
-	tags: string[];
-	explicitKeywords: string[];
-	implicitExpectations: string[];
-	positioningPromise: string;
-	confidence?: number;
-	evidence?: string[];
-	notes?: string;
-}
+const LARGE_BOOK_INLINE_BYTES = 512 * 1024;
 
-const apiBaseUrl = process.env.NEXT_PUBLIC_API_BASE_URL ?? "http://localhost:3001/api/v1";
-
-function parseList(value: string): string[] {
-	return value
-		.split(/[,，\n]/)
-		.map((item) => item.trim())
-		.filter(Boolean);
-}
-
-function parseOptionalNumber(value: string): number | undefined {
-	if (!value.trim()) {
-		return undefined;
+function formatFileSize(bytes: number) {
+	if (bytes >= 1024 * 1024) {
+		return `${(bytes / (1024 * 1024)).toFixed(1)} MB`;
+	}
+	if (bytes >= 1024) {
+		return `${Math.round(bytes / 1024)} KB`;
 	}
 
-	const parsed = Number(value);
-	return Number.isFinite(parsed) ? parsed : undefined;
+	return `${bytes} B`;
 }
 
 interface InferredReferenceProfile {
@@ -332,111 +345,74 @@ function buildReferenceProfileSample(text: string): string {
 	return `${normalized.slice(0, 5200)}\n\n……中间内容已省略，用于加快市场定位识别……\n\n${normalized.slice(-1600)}`;
 }
 
-function hashString(value: string): string {
-	let hash = 0;
-	for (let index = 0; index < value.length; index += 1) {
-		hash = (hash << 5) - hash + value.charCodeAt(index);
-		hash |= 0;
-	}
-
-	return String(hash);
-}
-
-async function postJson<T>(path: string, body: unknown): Promise<T> {
-	const response = await fetch(`${apiBaseUrl}${path}`, {
-		method: "POST",
-		headers: {
-			"content-type": "application/json",
-		},
-		body: JSON.stringify(body),
-	});
-
-	const payload = (await response.json()) as ApiEnvelope<T>;
-	if (!response.ok || payload.code !== 0) {
-		throw new Error(payload.message || `Request failed: ${response.status}`);
-	}
-
-	return payload.data;
-}
-
-function toQuickReviewErrorMessage(error: unknown): string {
-	const message = error instanceof Error ? error.message : String(error);
-	const normalized = message.toLowerCase();
-
-	if (
-		normalized.includes("403") ||
-		normalized.includes("kudos") ||
-		normalized.includes("heavy demand") ||
-		normalized.includes("429") ||
-		normalized.includes("rate limit") ||
-		normalized.includes("too many requests")
-	) {
-		return "当前模型服务正在限流或排队，请等 30 秒后再试。";
-	}
-
-	if (
-		normalized.includes("503") ||
-		normalized.includes("502") ||
-		normalized.includes("504") ||
-		normalized.includes("temporarily unavailable") ||
-		normalized.includes("provider request failed")
-	) {
-		return "模型服务暂时繁忙，请稍后重试。";
-	}
-
-	if (
-		normalized.includes("timed out") ||
-		normalized.includes("timeout") ||
-		normalized.includes("public workers may be busy")
-	) {
-		return "当前模型服务请求超时，请稍后重试；如果使用共享站，可能正在排队。";
-	}
-
-	if (
-		normalized.includes("failed to fetch") ||
-		normalized.includes("networkerror") ||
-		normalized.includes("network")
-	) {
-		return "网络连接失败，请确认 API 服务已启动，然后重试。";
-	}
-
-	if (
-		normalized.includes("json") ||
-		normalized.includes("unexpected token") ||
-		normalized.includes("extract")
-	) {
-		return "模型返回内容不完整，请重试一次。";
-	}
-
-	return message || "快速点评失败，请稍后重试。";
-}
-
-async function postForm<T>(path: string, body: FormData): Promise<T> {
-	const response = await fetch(`${apiBaseUrl}${path}`, {
-		method: "POST",
-		body,
-	});
-
-	const payload = (await response.json()) as ApiEnvelope<T>;
-	if (!response.ok || payload.code !== 0) {
-		throw new Error(payload.message || `Request failed: ${response.status}`);
-	}
-
-	return payload.data;
-}
-
-async function getJson<T>(path: string): Promise<T> {
-	const response = await fetch(`${apiBaseUrl}${path}`);
-	const payload = (await response.json()) as ApiEnvelope<T>;
-	if (!response.ok || payload.code !== 0) {
-		throw new Error(payload.message || `Request failed: ${response.status}`);
-	}
-
-	return payload.data;
-}
-
 function wait(ms: number) {
 	return new Promise((resolve) => window.setTimeout(resolve, ms));
+}
+
+interface BookJobProgressDetail {
+	outline: {
+		current: number;
+		total: number;
+		percent: number;
+	};
+	deep: {
+		current: number;
+		total: number;
+		percent: number;
+	};
+	strategy?: string;
+}
+
+function toProgressPercent(current: number, total: number) {
+	if (total <= 0) {
+		return 0;
+	}
+
+	return Math.max(0, Math.min(100, Math.round((current / total) * 100)));
+}
+
+function getBookJobProgressDetail(job: BookAnalysisJob | null): BookJobProgressDetail | null {
+	if (!job) {
+		return null;
+	}
+
+	const totalChapters =
+		job.partialResult?.totalChapters ??
+		job.preprocessing?.chapters.length ??
+		job.result?.mapReduce?.chunkCount ??
+		job.result?.mapReduce?.mapCount ??
+		0;
+	const outlineCurrent =
+		job.result?.mapReduce?.outlineCount ??
+		job.partialResult?.outlineCount ??
+		job.partialResult?.mapCount ??
+		(job.status === "succeeded" ? totalChapters : 0);
+	const deepTotal =
+		job.result?.mapReduce?.deepTargetOrders?.length ??
+		job.partialResult?.deepTargetOrders?.length ??
+		0;
+	const deepCurrent =
+		job.result?.mapReduce?.deepCount ??
+		job.partialResult?.deepCompletedCount ??
+		(job.status === "succeeded" ? deepTotal : 0);
+
+	if (totalChapters <= 0 && deepTotal <= 0) {
+		return null;
+	}
+
+	return {
+		outline: {
+			current: Math.min(outlineCurrent, totalChapters || outlineCurrent),
+			total: totalChapters,
+			percent: toProgressPercent(outlineCurrent, totalChapters),
+		},
+		deep: {
+			current: Math.min(deepCurrent, deepTotal || deepCurrent),
+			total: deepTotal,
+			percent: deepTotal > 0 ? toProgressPercent(deepCurrent, deepTotal) : 0,
+		},
+		strategy: job.result?.mapReduce?.strategy ?? job.partialResult?.analysisStrategy,
+	};
 }
 
 function downloadText(filename: string, content: string, contentType: string) {
@@ -611,6 +587,8 @@ export function NovelCritiqueConsole({ view = "overview" }: { view?: WorkspaceVi
 		setChapterTitle,
 		chapterText,
 		setChapterText,
+		quickReviewGenre,
+		setQuickReviewGenre,
 		rubricResult,
 		setRubricResult,
 		scoreResult,
@@ -646,16 +624,37 @@ export function NovelCritiqueConsole({ view = "overview" }: { view?: WorkspaceVi
 		setResearchComparison,
 		researchQuestion,
 		setResearchQaResult,
+		quickReviewCache,
+		setQuickReviewCache,
+		rubricCache,
+		setRubricCache,
+		scoreCache,
+		setScoreCache,
+		bookAnalysisCache,
+		setBookAnalysisCache,
 	} = useWorkspaceStore();
 	const [status, setStatus] = useState<string>(
 		"默认使用共享站；配置自己的 API Key 后，会使用你选择的模型服务。",
 	);
 	const [loading, setLoading] = useState<LoadingState>(null);
 	const [quickReviewElapsedSeconds, setQuickReviewElapsedSeconds] = useState(0);
+	const [previousQuickReviewResult, setPreviousQuickReviewResult] =
+		useState<QuickReviewResult | null>(null);
 	const referenceProfileCacheRef = useRef<Map<string, ReferenceProfileResult>>(new Map());
 	const chapterDraftTouchedRef = useRef(false);
 	const platformStrategyTouchedRef = useRef(false);
-	const scoreProgressTimersRef = useRef<number[]>([]);
+	const activeBookPollJobIdRef = useRef<string | null>(null);
+	const {
+		resetScoreProgress,
+		initializeScoreProgress,
+		revealScoreProgress,
+		failCurrentScoreProgress,
+	} = useScoreProgressController(setScoreProgress);
+	const {
+		resetReferenceProfileProgress,
+		initializeReferenceProfileProgress,
+		updateReferenceProfileProgress,
+	} = useReferenceProfileProgressController(setReferenceProfileProgress);
 
 	useEffect(() => {
 		if (loading !== "quick") {
@@ -676,76 +675,8 @@ export function NovelCritiqueConsole({ view = "overview" }: { view?: WorkspaceVi
 		router.push(workspaceViewRoutes[view]);
 	}
 
-	const allViewItems: Array<WorkspaceNavItem<WorkspaceView>> = [
-		{
-			id: "overview" as const,
-			label: "工作台",
-			icon: LayoutDashboard,
-			title: "小说拆解工作台",
-			description:
-				"集中查看当前进度、下一步动作和最近结果；具体操作进入章节、整书或研究页完成。",
-		},
-		{
-			id: "starter" as const,
-			label: "新手模式",
-			icon: Sparkles,
-			title: "新手模式",
-			description:
-				"如果你想用 AI 写网文，但还没看懂网文怎么运作：先让每本书只留下 3 条关键规律。",
-		},
-		{
-			id: "library" as const,
-			label: "研究决策",
-			icon: BookOpenCheck,
-			title: "研究决策",
-			description:
-				"把已拆解样本变成可追溯的创作判断：研究库、多书横向对比和选题 Prompt 都从这里汇总。",
-		},
-		{
-			id: "provider" as const,
-			label: "AI 设置",
-			icon: Settings,
-			title: "AI 设置",
-			description:
-				"选择用于分析小说的模型服务。可用共享站，也可以切换到自己的模型账号或本地模型。",
-		},
-		{
-			id: "chapter" as const,
-			label: "章节质检",
-			icon: FileText,
-			title: "章节质检",
-			description:
-				"围绕一个章节做快速判断、评分标准、完整评分和改文提示词，避免章节点评入口分散。",
-		},
-		{
-			id: "book" as const,
-			label: "整书资产",
-			icon: Network,
-			title: "整书资产",
-			description:
-				"上传 TXT，检查章节切分，逐章拆解世界观、人物和故事线；历史任务和导出围绕这里展开。",
-		},
-		{
-			id: "history" as const,
-			label: "历史任务",
-			icon: History,
-			title: "历史任务",
-			description: "重新打开以前的上传记录和整书拆解结果，服务重启后也能查看已完成报告。",
-		},
-		{
-			id: "exports" as const,
-			label: "导出中心",
-			icon: Download,
-			title: "导出中心",
-			description: "选择学习笔记或原创化素材包，再下载报告、角色卡、世界书和避险清单。",
-		},
-	];
-	const navItems = allViewItems.filter((item) =>
-		(["overview", "chapter", "book", "library", "provider"] as WorkspaceView[]).includes(
-			item.id,
-		),
-	);
-	const activeMeta = allViewItems.find((item) => item.id === activeView) ?? allViewItems[0];
+	const navItems = getWorkspaceNavItems();
+	const activeMeta = getWorkspaceViewMeta(activeView);
 
 	const providerPayload = useMemo(
 		() => ({
@@ -770,167 +701,75 @@ export function NovelCritiqueConsole({ view = "overview" }: { view?: WorkspaceVi
 	const isLongSerialization = readingMode === "long-serialization";
 	const isAlgorithmPlatform =
 		platform === "fanqie" || platform === "qimao" || platform === "wechat-short";
-	const performanceSnapshotNote = isShortFormReading
-		? "短篇付费重点看点击后的全文读完、平均阅读进度和付费解锁，不使用追更、下一章点击、前3章留存。"
-		: isLongSerialization
-			? "长篇追更重点看首章完读、加书架/收藏、章末下一章点击、前3章留存和追更；阅读60s只作低权重参考。"
-			: "移动端连载重点看点击后前30/60秒留住、触底、加书架、下一章点击和前3章留存。";
+	const performanceSnapshotNote = getPerformanceSnapshotNote({
+		isShortFormReading,
+		isLongSerialization,
+	});
 	const providerLabel =
 		provider.kind === "mock" ? "本地演示" : providerPresets[provider.preset].label;
 	const referenceProfileApplied = referenceProfileProgress.some(
 		(item) => item.id === "apply" && item.status === "completed",
 	);
-	const hasChapterDraft = Boolean(chapterText.trim());
-	const hasReferenceText = Boolean(referenceText.trim());
-	const hasPerformanceSnapshot = [
-		impressions,
-		clickThroughRate,
-		validReadRate,
-		read30sRate,
-		read60sRate,
-		bottomRate,
-		followRate,
-		bookshelfRate,
-		firstChapterCompletionRate,
-		nextChapterClickRate,
-		threeChapterRetentionRate,
-		avgReadProgressRate,
-		paidUnlockRate,
-	].some((item) => parseOptionalNumber(item) !== undefined);
-	const chapterProjectSteps = [
-		{
-			label: "平台和策略画像",
-			done: Boolean(platform && audience && readingMode),
-			detail: `${optionLabel(platformOptions, platform)} · ${optionLabel(
-				audienceOptions,
-				audience,
-			)} · ${optionLabel(readingModeOptions, readingMode)}`,
-		},
-		{
-			label: "成熟章节导入",
-			done: hasReferenceText,
-			detail: hasReferenceText
-				? referenceFileName || `${referenceText.trim().length} 字参考文本`
-				: "可稍后导入，用来生成更细的评分标准。",
-		},
-		{
-			label: "快速点评",
-			done: Boolean(quickReviewResult),
-			detail: quickReviewResult
-				? `${quickReviewResult.quickScore}/10 · ${quickReviewResult.mainProblem}`
-				: hasChapterDraft
-					? "已有章节正文，可以先跑一次快速点评。"
-					: "先粘贴自己的章节正文，最快看到反馈。",
-		},
-		{
-			label: "市场定位识别",
-			done: Boolean(category.trim() && theme.trim()),
-			detail: referenceProfileApplied
-				? "AI 识别结果已写入，可继续校正。"
-				: "可手动填写；建议点击 AI 识别获得更可靠的定位。",
-		},
-		{
-			label: "评分标准",
-			done: Boolean(rubricResult),
-			detail: rubricResult
-				? `${rubricResult.rubric.metrics.length} 个评分指标`
-				: "尚未生成评分标准。",
-		},
-		{
-			label: "章节评分",
-			done: Boolean(scoreResult),
-			detail: scoreResult
-				? `${scoreResult.totalScore}/10 · ${scoreResult.weakestPoint}`
-				: "尚未开始评分。",
-		},
-		{
-			label: "数据快照",
-			done: hasPerformanceSnapshot,
-			detail: hasPerformanceSnapshot ? performanceSnapshotNote : "未提供数据表现指标。",
-		},
-	];
-	const chapterCompletion = Math.round(
-		(chapterProjectSteps.filter((step) => step.done).length / chapterProjectSteps.length) * 100,
+	const platformLabel = optionLabel(platformOptions, platform);
+	const audienceLabel = optionLabel(audienceOptions, audience);
+	const readingModeLabel = optionLabel(readingModeOptions, readingMode);
+	const {
+		hasChapterDraft,
+		hasReferenceText,
+		chapterProjectSteps,
+		chapterCompletion,
+		nextChapterAction,
+	} = buildChapterWorkspaceSummary({
+		platformLabel,
+		audienceLabel,
+		readingModeLabel,
+		referenceText,
+		referenceFileName,
+		chapterText,
+		quickReviewResult,
+		referenceProfileApplied,
+		category,
+		theme,
+		rubricResult,
+		scoreResult,
+		performanceValues: [
+			impressions,
+			clickThroughRate,
+			validReadRate,
+			read30sRate,
+			read60sRate,
+			bottomRate,
+			followRate,
+			bookshelfRate,
+			firstChapterCompletionRate,
+			nextChapterClickRate,
+			threeChapterRetentionRate,
+			avgReadProgressRate,
+			paidUnlockRate,
+		],
+		performanceSnapshotNote,
+	});
+	const nextAction = buildOverviewNextAction({
+		hasChapterDraft,
+		quickReviewResult,
+		hasReferenceText,
+		referenceProfileApplied,
+		rubricResult,
+		scoreResult,
+	});
+	const { bookStatusText, bookCompletion } = buildBookWorkspaceSummary({
+		bookJob,
+		bookUpload,
+	});
+	const bookProgressDetail = getBookJobProgressDetail(bookJob);
+	const quickReviewCacheHit = quickReviewCache.find(
+		(item) => item.key === buildQuickReviewCacheKey(),
 	);
-	const nextChapterAction = !rubricResult
-		? "生成评分标准"
-		: !scoreResult
-			? "开始章节评分"
-			: "查看评分报告";
-	const nextAction = !hasChapterDraft
-		? {
-				title: "先粘贴自己的章节",
-				description:
-					"不用先填完所有信息。粘贴一段正文后，可以先跑快速点评，马上看到卖点、问题和改稿方向。",
-				actionLabel: "去快速点评",
-				view: "chapter" as const,
-				secondaryLabel: "选择模型",
-				secondaryView: "provider" as const,
-			}
-		: !quickReviewResult
-			? {
-					title: "先生成快速点评",
-					description:
-						"快速点评只需要一段正文，会先给出定位、卖点、最大问题和三条改法；精评可以稍后再做。",
-					actionLabel: "生成快速点评",
-					view: "chapter" as const,
-					secondaryLabel: "导入参考章节",
-					secondaryView: "chapter" as const,
-				}
-			: !hasReferenceText
-				? {
-						title: "想精评时再导入参考章节",
-						description:
-							"快速点评已经能给方向。需要更细的评分报告时，再导入一章成熟样本，让系统生成贴合目标题材的评分标准。",
-						actionLabel: "导入成熟章节",
-						view: "chapter" as const,
-						secondaryLabel: "查看快速点评",
-						secondaryView: "chapter" as const,
-					}
-				: !referenceProfileApplied
-					? {
-							title: "先校准市场定位",
-							description:
-								"当前还没有完成市场定位校准。先确认分类、主题、标签和读者期待，后面的评分标准才不会偏。",
-							actionLabel: "去 AI 识别定位",
-							view: "chapter" as const,
-							secondaryLabel: "AI 设置",
-							secondaryView: "provider" as const,
-						}
-					: !rubricResult
-						? {
-								title: "生成本章评分标准",
-								description:
-									"市场定位已经可用，下一步把成熟章节拆成可复用的评分标准，再用同一套标准质检你的章节。",
-								actionLabel: "去生成评分标准",
-								view: "chapter" as const,
-								secondaryLabel: "调整策略画像",
-								secondaryView: "chapter" as const,
-							}
-						: !scoreResult
-							? {
-									title: "开始质检你的章节",
-									description:
-										"评分标准已生成。现在可以按目标平台、市场定位、平台策略和数据快照给你的章节打分。",
-									actionLabel: "去开始评分",
-									view: "chapter" as const,
-									secondaryLabel: "查看评分标准",
-									secondaryView: "chapter" as const,
-								}
-							: {
-									title: "先改最大短板",
-									description: scoreResult.nextRevisionMove,
-									actionLabel: "查看评分报告",
-									view: "chapter" as const,
-									secondaryLabel: "拆解整书",
-									secondaryView: "book" as const,
-								};
-	const bookStatusText = bookJob
-		? `${bookJob.status} · ${bookJob.progress.message}`
-		: bookUpload
-			? `已预览 ${bookUpload.chapterCount} 个章节片段`
-			: "未启动整书拆解";
-	const bookCompletion = bookJob?.status === "succeeded" ? 100 : bookUpload ? 35 : 0;
+	const rubricCacheHit = rubricCache.find((item) => item.key === buildRubricCacheKey());
+	const scoreCacheHit = scoreCache.find((item) => item.key === buildScoreCacheKey());
+	const bookAnalysisCacheHit = bookAnalysisCache.find(
+		(item) => item.key === buildBookAnalysisCacheKey(),
+	);
 	const researchGraph = buildResearchGraph(bookAnalysisResult);
 	const scoreEvidenceChain = buildScoreEvidenceChain(scoreResult);
 	const comparisonSamples = buildComparisonSamples(bookAnalysisResult, bookHistory);
@@ -940,67 +779,30 @@ export function NovelCritiqueConsole({ view = "overview" }: { view?: WorkspaceVi
 		comparisonSamples,
 	);
 	const beginnerLearningDigest = buildBeginnerLearningDigest(bookAnalysisResult);
-	const researchSourceCount = [
-		referenceText.trim(),
-		chapterText.trim(),
-		bookUpload,
-		bookAnalysisResult,
-		scoreResult,
-	].filter(Boolean).length;
 	const graphNodeCount = researchGraph.nodes.length;
 	const graphEdgeCount = researchGraph.edges.length;
+	const bookFileTooLargeForInlinePreview = Boolean(
+		bookFile && bookFile.size > LARGE_BOOK_INLINE_BYTES && !bookText.trim(),
+	);
 	const foreshadowingCount = researchGraph.nodes.filter(
 		(item) => item.type === "foreshadowing",
 	).length;
 	const evidenceScoreCount = scoreEvidenceChain.items.filter((item) => item.evidence).length;
 	const comparableBookCount = comparisonSamples.samples.length;
-	const researchReadiness = Math.round(
-		((researchSourceCount > 0 ? 1 : 0) +
-			(graphNodeCount > 0 ? 1 : 0) +
-			(scoreResult ? 1 : 0) +
-			(comparableBookCount >= 2 ? 1 : 0)) *
-			25,
-	);
-	const researchSources = [
-		{
-			name: "成熟章节样本",
-			status: referenceText.trim() ? "已接入" : "缺失",
-			detail: referenceFileName || `${referenceText.trim().length} 字参考章节`,
-		},
-		{
-			name: "我的目标章节",
-			status: chapterText.trim() ? "已接入" : "缺失",
-			detail: `${chapterTitle} · ${chapterText.trim().length} 字`,
-		},
-		{
-			name: "整书资料",
-			status: bookUpload || bookAnalysisResult ? "已接入" : "待上传",
-			detail: bookUpload
-				? `${bookUpload.title} · ${bookUpload.chapterCount} 个章节片段`
-				: bookAnalysisResult
-					? `${bookAnalysisResult.book.title} · 已拆解`
-					: "用于抽取人物、事件、伏笔和世界规则。",
-		},
-		{
-			name: "可解释评分报告",
-			status: scoreResult ? "已生成" : "待评分",
-			detail: scoreResult
-				? `${scoreResult.totalScore}/10 · ${evidenceScoreCount} 条证据`
-				: "需要先生成评分标准并完成章节评分。",
-		},
-		{
-			name: "多书样本池",
-			status: comparableBookCount >= 2 ? "可对比" : "样本不足",
-			detail: `${comparableBookCount} 本已拆解样本；横向对比建议至少 2 本，最好 5-10 本。`,
-		},
-	];
-
-	useEffect(() => {
-		return () => {
-			scoreProgressTimersRef.current.forEach((timer) => window.clearTimeout(timer));
-			scoreProgressTimersRef.current = [];
-		};
-	}, []);
+	const { researchSourceCount, researchReadiness, researchSources } =
+		buildResearchWorkspaceSummary({
+			referenceText,
+			chapterText,
+			chapterTitle,
+			referenceFileName,
+			bookUpload,
+			bookAnalysisResult,
+			scoreResult,
+			graphNodeCount,
+			graphEdgeCount,
+			evidenceScoreCount,
+			comparableBookCount,
+		});
 
 	useEffect(() => {
 		if (activeView === "library" && !persistedResearchLibrary) {
@@ -1008,165 +810,166 @@ export function NovelCritiqueConsole({ view = "overview" }: { view?: WorkspaceVi
 		}
 	}, [activeView, persistedResearchLibrary]);
 
-	function clearScoreProgressTimers() {
-		scoreProgressTimersRef.current.forEach((timer) => window.clearTimeout(timer));
-		scoreProgressTimersRef.current = [];
-	}
+	useEffect(() => {
+		if (bookHistory.length || uploadHistory.length) {
+			return;
+		}
 
-	function resetScoreProgress() {
-		clearScoreProgressTimers();
-		setScoreProgress([]);
-	}
+		void loadHistory({ silent: true });
+	}, [bookHistory.length, uploadHistory.length]);
 
-	function initializeScoreProgress(metrics: RubricMetric[]) {
-		clearScoreProgressTimers();
-		setScoreProgress(
-			metrics.map((metric, index) => ({
-				metricId: metric.id,
-				name: metric.name,
-				status: index === 0 ? "checking" : "pending",
-			})),
-		);
-	}
+	useEffect(() => {
+		if (!bookJob?.id) {
+			return;
+		}
 
-	function revealScoreProgress(result: ScoreResult) {
-		clearScoreProgressTimers();
-		setScoreProgress(
-			result.scores.map((score, index) => ({
-				metricId: score.metricId,
-				name: score.name,
-				status: index === 0 ? "checking" : "pending",
-			})),
-		);
+		if (bookJob.status === "queued" || bookJob.status === "running") {
+			void followBookJob(bookJob.id, {
+				background: true,
+				silent: true,
+				maxAttempts: 600,
+			});
+			return;
+		}
 
-		result.scores.forEach((score, index) => {
-			const timer = window.setTimeout(
-				() => {
-					setScoreProgress((current) =>
-						current.map((item, itemIndex) => {
-							if (item.metricId === score.metricId) {
-								return {
-									...item,
-									status: "completed",
-									score: score.score,
-									reason: score.reason,
-									evidence: score.evidence,
-									fix: score.fix,
-								};
-							}
+		if (bookJob.status === "succeeded" && !bookAnalysisResult) {
+			void openHistoryJob(bookJob.id, { silent: true, preserveLoading: true });
+		}
+	}, [bookAnalysisResult, bookJob?.id, bookJob?.status]);
 
-							if (itemIndex === index + 1 && item.status === "pending") {
-								return { ...item, status: "checking" };
-							}
-
-							return item;
-						}),
-					);
-				},
-				200 + index * 320,
-			);
-			scoreProgressTimersRef.current.push(timer);
+	function buildQuickReviewCacheKey() {
+		return createQuickReviewCacheKey({
+			provider,
+			quickReviewGenre,
+			chapterTitle,
+			chapterText,
 		});
 	}
 
-	function failCurrentScoreProgress() {
-		clearScoreProgressTimers();
-		setScoreProgress((current) =>
-			current.map((item) =>
-				item.status === "checking" ? { ...item, status: "failed" } : item,
-			),
-		);
+	function buildRubricCacheKey() {
+		return createRubricCacheKey({
+			provider,
+			referenceTitle,
+			genre,
+			platform,
+			audience,
+			readingMode,
+			category,
+			theme,
+			tags,
+			explicitKeywords,
+			implicitExpectations,
+			positioningPromise,
+			recommendationSignals,
+			competitionLevel,
+			competitionNotes,
+			pushStage,
+			trafficEntry,
+			referenceText,
+		});
 	}
 
-	function resetReferenceProfileProgress() {
-		setReferenceProfileProgress([]);
+	function buildScoreCacheKey() {
+		return createScoreCacheKey({
+			provider,
+			rubricResult,
+			platform,
+			audience,
+			readingMode,
+			category,
+			theme,
+			tags,
+			explicitKeywords,
+			implicitExpectations,
+			positioningPromise,
+			recommendationSignals,
+			competitionLevel,
+			competitionNotes,
+			pushStage,
+			trafficEntry,
+			chapterTitle,
+			chapterText,
+			aiSelfTestEnabled,
+			enabledAiSelfTests,
+			performanceValues: [
+				impressions,
+				clickThroughRate,
+				validReadRate,
+				read30sRate,
+				read60sRate,
+				bottomRate,
+				followRate,
+				bookshelfRate,
+				firstChapterCompletionRate,
+				nextChapterClickRate,
+				threeChapterRetentionRate,
+				avgReadProgressRate,
+				paidUnlockRate,
+			],
+		});
 	}
 
-	function initializeReferenceProfileProgress() {
-		setReferenceProfileProgress([
-			{
-				id: "sample",
-				name: "准备识别样本",
-				status: "checking",
-				detail: "长文本会抽取开头和结尾，减少等待时间。",
-			},
-			{
-				id: "model",
-				name: "AI 校准市场定位",
-				status: "pending",
-				detail: "等待模型识别分类、主题、标签和读者期待。",
-			},
-			{
-				id: "apply",
-				name: "写入画像字段",
-				status: "pending",
-				detail: "把识别结果同步到下面可修改的字段。",
-			},
-		]);
+	function buildBookAnalysisCacheKey() {
+		return createBookAnalysisCacheKey({
+			provider,
+			bookGenre,
+			bookTitle,
+			bookText,
+			bookFile,
+		});
 	}
 
-	function updateReferenceProfileProgress(
-		id: ReferenceProfileProgressStepId,
-		patch: Partial<Omit<ReferenceProfileProgressItem, "id" | "name">>,
+	function rememberQuickReview(key: string, result: QuickReviewResult) {
+		const entry = createQuickReviewCacheEntry({
+			key,
+			chapterTitle,
+			quickReviewGenre,
+			result,
+		});
+		setQuickReviewCache((current) => upsertCacheEntry(current, entry));
+	}
+
+	function rememberRubric(key: string, result: RubricResult) {
+		const entry = createRubricCacheEntry({
+			key,
+			referenceTitle,
+			result,
+		});
+		setRubricCache((current) => upsertCacheEntry(current, entry));
+	}
+
+	function rememberScore(key: string, result: ScoreResult) {
+		const entry = createScoreCacheEntry({
+			key,
+			chapterTitle,
+			result,
+		});
+		setScoreCache((current) => upsertCacheEntry(current, entry));
+	}
+
+	function rememberBookAnalysis(
+		key: string,
+		job: BookAnalysisJob,
+		result: BookAnalysisResult | null,
 	) {
-		setReferenceProfileProgress((current) =>
-			current.map((item) => (item.id === id ? { ...item, ...patch } : item)),
-		);
+		const entry = createBookAnalysisCacheEntry({
+			key,
+			bookTitle,
+			job,
+			result,
+		});
+		setBookAnalysisCache((current) => upsertCacheEntry(current, entry));
 	}
 
-	function buildReferenceProfileFacts(
-		profile: InferredReferenceProfile | ReferenceProfileResult,
-	): ReferenceProfileProgressItem["facts"] {
-		const isModelProfile = "referenceTitle" in profile;
-		const title = isModelProfile ? profile.referenceTitle : profile.title;
-		const facts = [
-			{ label: "标题", value: title },
-			{ label: "题材", value: profile.genre },
-			{ label: "细分分类", value: profile.category },
-			{ label: "主题承诺", value: profile.theme },
-			{
-				label: "标签",
-				value: Array.isArray(profile.tags) ? profile.tags.join("、") : profile.tags,
-			},
-			{
-				label: "显性关键词",
-				value: Array.isArray(profile.explicitKeywords)
-					? profile.explicitKeywords.join("、")
-					: profile.explicitKeywords,
-			},
-			{
-				label: "隐性期待",
-				value: Array.isArray(profile.implicitExpectations)
-					? profile.implicitExpectations.join("、")
-					: profile.implicitExpectations,
-			},
-			{ label: "标题/简介承诺", value: profile.positioningPromise },
-		].filter((item) => item.value);
-
-		if (isModelProfile && typeof profile.confidence === "number") {
-			facts.push({
-				label: "置信度",
-				value: `${Math.round(profile.confidence * 100)}%`,
-			});
-		}
-
-		if (isModelProfile && profile.evidence?.length) {
-			facts.push({
-				label: "识别证据",
-				value: profile.evidence.join("；"),
-			});
-		}
-
-		return facts;
+	function updateBookAnalysisCacheByJobId(jobId: string, job: BookAnalysisJob) {
+		setBookAnalysisCache((current) => updateCachedBookAnalysisByJobId(current, jobId, job));
 	}
 
 	async function testProvider() {
 		setLoading("provider");
 		setStatus("正在测试模型服务...");
 		try {
-			const result = await postJson<Record<string, unknown>>("/analysis/provider/test", {
-				provider: providerPayload,
-			});
+			const result = await testProviderConnection(providerPayload);
 			const providerName = providerPresets[provider.preset].label;
 			const modelName =
 				provider.kind === "mock"
@@ -1201,6 +1004,7 @@ export function NovelCritiqueConsole({ view = "overview" }: { view?: WorkspaceVi
 	function useExampleChapter() {
 		setChapterTitle("第一章 考场重逢");
 		setChapterText(defaultUserText);
+		setPreviousQuickReviewResult(null);
 		setQuickReviewResult(null);
 		setScoreResult(null);
 		setStatus("已填入示例章节。示例只用于演示，你可以直接替换成自己的正文。");
@@ -1321,16 +1125,14 @@ export function NovelCritiqueConsole({ view = "overview" }: { view?: WorkspaceVi
 					? `已使用全文识别，共 ${sampledText.length} 字。`
 					: `已抽取 ${sampledText.length} 字样本，保留开头和结尾以加快识别。`,
 		});
-		const cacheKey = [
-			provider.preset,
-			provider.baseUrl,
-			provider.model,
+		const cacheKey = createReferenceProfileCacheKey({
+			provider,
 			platform,
 			audience,
 			readingMode,
-			filename ? basenameWithoutExtension(filename) : referenceTitle,
-			hashString(sampledText),
-		].join("|");
+			referenceTitle: filename ? basenameWithoutExtension(filename) : referenceTitle,
+			sampledText,
+		});
 		const cached = referenceProfileCacheRef.current.get(cacheKey);
 		if (cached) {
 			updateReferenceProfileProgress("model", {
@@ -1355,7 +1157,7 @@ export function NovelCritiqueConsole({ view = "overview" }: { view?: WorkspaceVi
 			detail: "正在请求模型识别参考章节的市场定位。",
 		});
 		try {
-			const result = await postJson<ReferenceProfileResult>("/analysis/reference/profile", {
+			const result = await requestReferenceProfile({
 				provider: providerPayload,
 				referenceTitle: filename ? basenameWithoutExtension(filename) : referenceTitle,
 				platform,
@@ -1412,13 +1214,30 @@ export function NovelCritiqueConsole({ view = "overview" }: { view?: WorkspaceVi
 		}
 	}
 
-	async function buildRubric() {
+	async function buildRubric(force = false) {
+		const cacheKey = buildRubricCacheKey();
+		if (!force) {
+			const cached = rubricCache.find((item) => item.key === cacheKey);
+			if (cached) {
+				setRubricResult(cached.result);
+				setScoreResult(null);
+				resetScoreProgress();
+				setStatus("已使用缓存的评分标准；如需让 AI 重新拆解，请点“重新分析”。");
+				return;
+			}
+		}
+
 		setLoading("rubric");
 		setScoreResult(null);
 		resetScoreProgress();
-		setStatus("正在拆解参考章节并生成评分标准...");
+		const rubricReferenceText = compactReferenceText(referenceText);
+		setStatus(
+			rubricReferenceText.length === referenceText.trim().length
+				? "正在拆解参考章节并生成评分标准..."
+				: `参考章节超过单次分析长度，已抽取 ${rubricReferenceText.length} 字的开头和结尾生成评分标准...`,
+		);
 		try {
-			const result = await postJson<RubricResult>("/analysis/rubric", {
+			const result = await requestRubric({
 				provider: providerPayload,
 				referenceTitle,
 				genre,
@@ -1427,18 +1246,19 @@ export function NovelCritiqueConsole({ view = "overview" }: { view?: WorkspaceVi
 				readingMode,
 				category,
 				theme,
-				tags: parseList(tags),
-				explicitKeywords: parseList(explicitKeywords),
-				implicitExpectations: parseList(implicitExpectations),
+				tags,
+				explicitKeywords,
+				implicitExpectations,
 				positioningPromise,
-				recommendationSignals: parseList(recommendationSignals),
+				recommendationSignals,
 				competitionLevel,
 				competitionNotes,
 				pushStage,
-				trafficEntry: parseList(trafficEntry),
-				referenceText,
+				trafficEntry,
+				referenceText: rubricReferenceText,
 			});
 			setRubricResult(result);
+			rememberRubric(cacheKey, result);
 			setStatus(`评分标准已生成：${result.rubric.metrics.length} 个指标`);
 		} catch (error) {
 			setStatus((error as Error).message);
@@ -1447,10 +1267,21 @@ export function NovelCritiqueConsole({ view = "overview" }: { view?: WorkspaceVi
 		}
 	}
 
-	async function scoreChapter() {
+	async function scoreChapter(force = false) {
 		if (!rubricResult) {
 			setStatus("请先生成评分标准。");
 			return;
+		}
+
+		const cacheKey = buildScoreCacheKey();
+		if (!force) {
+			const cached = scoreCache.find((item) => item.key === cacheKey);
+			if (cached) {
+				setScoreResult(cached.result);
+				revealScoreProgress(cached.result);
+				setStatus("已使用缓存的章节评分结果；如需让 AI 重新评分，请点“重新分析”。");
+				return;
+			}
 		}
 
 		setLoading("score");
@@ -1458,7 +1289,7 @@ export function NovelCritiqueConsole({ view = "overview" }: { view?: WorkspaceVi
 		initializeScoreProgress(rubricResult.rubric.metrics);
 		setStatus("正在按评分标准质检你的章节...");
 		try {
-			const result = await postJson<ScoreResult>("/analysis/score", {
+			const result = await requestScoreChapter({
 				provider: providerPayload,
 				rubric: rubricResult.rubric,
 				platform,
@@ -1466,48 +1297,37 @@ export function NovelCritiqueConsole({ view = "overview" }: { view?: WorkspaceVi
 				readingMode,
 				category,
 				theme,
-				tags: parseList(tags),
-				explicitKeywords: parseList(explicitKeywords),
-				implicitExpectations: parseList(implicitExpectations),
+				tags,
+				explicitKeywords,
+				implicitExpectations,
 				positioningPromise,
-				recommendationSignals: parseList(recommendationSignals),
+				recommendationSignals,
 				competitionLevel,
 				competitionNotes,
 				pushStage,
-				trafficEntry: parseList(trafficEntry),
+				trafficEntry,
 				chapterTitle,
 				chapterText,
-				aiSelfTest: {
-					enabled: aiSelfTestEnabled && enabledAiSelfTests.length > 0,
-					tests: enabledAiSelfTests,
-				},
-				performanceSnapshot: {
-					impressions: parseOptionalNumber(impressions),
-					clickThroughRate: parseOptionalNumber(clickThroughRate),
-					validReadRate: isAlgorithmPlatform
-						? parseOptionalNumber(validReadRate)
-						: undefined,
-					read30sRate: parseOptionalNumber(read30sRate),
-					read60sRate: parseOptionalNumber(read60sRate),
-					bottomRate: parseOptionalNumber(bottomRate),
-					followRate: isShortFormReading ? undefined : parseOptionalNumber(followRate),
-					bookshelfRate: parseOptionalNumber(bookshelfRate),
-					firstChapterCompletionRate: parseOptionalNumber(firstChapterCompletionRate),
-					nextChapterClickRate: isShortFormReading
-						? undefined
-						: parseOptionalNumber(nextChapterClickRate),
-					threeChapterRetentionRate: isShortFormReading
-						? undefined
-						: parseOptionalNumber(threeChapterRetentionRate),
-					avgReadProgressRate: isShortFormReading
-						? parseOptionalNumber(avgReadProgressRate)
-						: undefined,
-					paidUnlockRate: isShortFormReading
-						? parseOptionalNumber(paidUnlockRate)
-						: undefined,
-				},
+				aiSelfTestEnabled,
+				enabledAiSelfTests,
+				isAlgorithmPlatform,
+				isShortFormReading,
+				impressions,
+				clickThroughRate,
+				validReadRate,
+				read30sRate,
+				read60sRate,
+				bottomRate,
+				followRate,
+				bookshelfRate,
+				firstChapterCompletionRate,
+				nextChapterClickRate,
+				threeChapterRetentionRate,
+				avgReadProgressRate,
+				paidUnlockRate,
 			});
 			setScoreResult(result);
+			rememberScore(cacheKey, result);
 			revealScoreProgress(result);
 			setStatus(`评分完成：${result.totalScore}/10`);
 		} catch (error) {
@@ -1518,13 +1338,29 @@ export function NovelCritiqueConsole({ view = "overview" }: { view?: WorkspaceVi
 		}
 	}
 
-	async function runQuickExperience() {
+	async function runQuickExperience(force = false) {
 		if (chapterText.trim().length < 50) {
 			setStatus("请先粘贴至少 50 字章节正文，再运行快速点评。");
 			return;
 		}
 
+		const cacheKey = buildQuickReviewCacheKey();
+		if (!force) {
+			const cached = quickReviewCache.find((item) => item.key === cacheKey);
+			if (cached) {
+				if (quickReviewResult) {
+					setPreviousQuickReviewResult(quickReviewResult);
+				}
+				setQuickReviewResult(cached.result);
+				setStatus("已使用缓存的快速点评；如需让 AI 重新点评，请点“重新分析”。");
+				return;
+			}
+		}
+
 		setLoading("quick");
+		if (quickReviewResult) {
+			setPreviousQuickReviewResult(quickReviewResult);
+		}
 		setQuickReviewResult(null);
 		setStatus("正在读取章节...");
 		const queueStatusTimer = window.setTimeout(() => {
@@ -1536,13 +1372,14 @@ export function NovelCritiqueConsole({ view = "overview" }: { view?: WorkspaceVi
 		}, 10_000);
 		try {
 			setStatus("正在生成快速点评...");
-			const result = await postJson<QuickReviewResult>("/analysis/quick-review", {
+			const result = await requestQuickReview({
 				provider: providerPayload,
 				chapterText,
-				title: chapterTitle || undefined,
-				genre: genre || undefined,
+				chapterTitle,
+				quickReviewGenre,
 			});
 			setQuickReviewResult(result);
+			rememberQuickReview(cacheKey, result);
 			setStatus(`快速点评完成：${result.quickScore}/10`);
 		} catch (error) {
 			setStatus(toQuickReviewErrorMessage(error));
@@ -1552,20 +1389,43 @@ export function NovelCritiqueConsole({ view = "overview" }: { view?: WorkspaceVi
 		}
 	}
 
-	async function analyzeBook() {
+	async function analyzeBook(force = false) {
+		const cacheKey = buildBookAnalysisCacheKey();
+		if (!force) {
+			const cached = bookAnalysisCache.find((item) => item.key === cacheKey);
+			if (cached) {
+				setBookJob(cached.job);
+				if (cached.result) {
+					setBookAnalysisResult(cached.result);
+				}
+				setStatus(
+					cached.job.status === "succeeded"
+						? "已使用缓存的整书拆解结果；如需让 AI 重新拆解，请点“重新拆解”。"
+						: "已恢复这本书的历史任务，继续同步最新状态。",
+				);
+				if (cached.job.status === "queued" || cached.job.status === "running") {
+					await followBookJob(cached.job.id, {
+						background: true,
+						silent: true,
+						maxAttempts: 600,
+					});
+				}
+				return;
+			}
+		}
+
 		setLoading("book");
 		setBookAnalysisResult(null);
 		setBookJob(null);
 		setStatus("正在准备上传文本并创建整书异步拆解任务...");
 		try {
 			const upload = bookUpload ?? (await uploadBookForPreview(false));
-			const createdUploadJob = await postJson<BookAnalysisJob>(
-				`/analysis/book/uploads/${upload.id}/jobs`,
-				{
-					provider: providerPayload,
-				},
+			const createdUploadJob = await createBookAnalysisJobFromUpload(
+				upload.id,
+				providerPayload,
 			);
 			setBookJob(createdUploadJob);
+			rememberBookAnalysis(cacheKey, createdUploadJob, null);
 			setStatus(`任务已创建：${createdUploadJob.id}`);
 
 			await followBookJob(createdUploadJob.id);
@@ -1586,12 +1446,7 @@ export function NovelCritiqueConsole({ view = "overview" }: { view?: WorkspaceVi
 		setBookAnalysisResult(null);
 		setStatus("正在从已完成章节继续整书拆解...");
 		try {
-			const resumedJob = await postJson<BookAnalysisJob>(
-				`/analysis/book/jobs/${bookJob.id}/resume`,
-				{
-					provider: providerPayload,
-				},
-			);
+			const resumedJob = await resumeBookAnalysisJob(bookJob.id, providerPayload);
 			setBookJob(resumedJob);
 			await followBookJob(resumedJob.id);
 		} catch (error) {
@@ -1601,29 +1456,62 @@ export function NovelCritiqueConsole({ view = "overview" }: { view?: WorkspaceVi
 		}
 	}
 
-	async function followBookJob(jobId: string) {
-		for (let attempt = 0; attempt < 120; attempt += 1) {
-			await wait(1000);
-			const latestJob = await getJson<BookAnalysisJob>(`/analysis/book/jobs/${jobId}`);
-			setBookJob(latestJob);
-			setStatus(latestJob.progress.message);
-
-			if (latestJob.status === "succeeded") {
-				if (latestJob.result) {
-					setBookAnalysisResult(latestJob.result);
-					setStatus(
-						`整书拆解完成：${latestJob.result.characters.length} 张角色卡，已分析 ${latestJob.result.mapReduce?.mapCount ?? 0} 个章节片段`,
-					);
-				}
-				return latestJob;
-			}
-
-			if (latestJob.status === "failed") {
-				throw new Error(latestJob.error || "整书拆解任务失败");
-			}
+	async function followBookJob(
+		jobId: string,
+		options?: {
+			background?: boolean;
+			silent?: boolean;
+			maxAttempts?: number;
+		},
+	) {
+		if (activeBookPollJobIdRef.current === jobId) {
+			return null;
 		}
 
-		throw new Error("整书拆解任务仍在运行，请稍后查询 job 状态。");
+		activeBookPollJobIdRef.current = jobId;
+		let latestSnapshot: BookAnalysisJob | null = null;
+
+		try {
+			for (let attempt = 0; attempt < (options?.maxAttempts ?? 120); attempt += 1) {
+				await wait(1000);
+				const latestJob = await readBookAnalysisJob(jobId, false);
+				latestSnapshot = latestJob;
+				setBookJob(latestJob);
+				updateBookAnalysisCacheByJobId(jobId, latestJob);
+				if (!options?.silent) {
+					setStatus(latestJob.progress.message);
+				}
+
+				if (latestJob.status === "succeeded") {
+					const completedJob = await readBookAnalysisJob(jobId, true);
+					setBookJob(completedJob);
+					if (completedJob.result) {
+						latestJob.result = completedJob.result;
+						setBookAnalysisResult(completedJob.result);
+						updateBookAnalysisCacheByJobId(jobId, completedJob);
+						if (!options?.silent) {
+							setStatus(
+								`整书拆解完成：${latestJob.result.characters.length} 张角色卡，已分析 ${latestJob.result.mapReduce?.mapCount ?? 0} 个章节片段`,
+							);
+						}
+					}
+					return latestJob;
+				}
+
+				if (latestJob.status === "failed") {
+					throw new Error(latestJob.error || "整书拆解任务失败");
+				}
+			}
+
+			if (latestSnapshot && !options?.silent) {
+				setStatus("整书拆解仍在后台运行，刷新页面后也会自动恢复任务状态。");
+			}
+			return latestSnapshot;
+		} finally {
+			if (activeBookPollJobIdRef.current === jobId) {
+				activeBookPollJobIdRef.current = null;
+			}
+		}
 	}
 
 	async function uploadBookForPreview(manageLoading = true) {
@@ -1634,17 +1522,12 @@ export function NovelCritiqueConsole({ view = "overview" }: { view?: WorkspaceVi
 		setBookJob(null);
 		setStatus("正在上传 TXT 并生成章节预览...");
 		try {
-			const formData = new FormData();
-			const file =
-				bookFile ??
-				new File([bookText], `${bookTitle || "novel"}.txt`, {
-					type: "text/plain",
-				});
-			formData.append("file", file);
-			formData.append("title", bookTitle);
-			formData.append("genre", bookGenre);
-
-			const upload = await postForm<BookUploadPreview>("/analysis/book/uploads", formData);
+			const upload = await uploadBookPreview({
+				bookFile,
+				bookText,
+				bookTitle,
+				bookGenre,
+			});
 			setBookUpload(upload);
 			setStatus(`章节预览完成：${upload.chapterCount} 个章节片段`);
 			return upload;
@@ -1658,17 +1541,52 @@ export function NovelCritiqueConsole({ view = "overview" }: { view?: WorkspaceVi
 		}
 	}
 
-	async function loadHistory() {
-		setLoading("history");
-		setStatus("正在加载历史任务...");
+	async function loadHistory(options?: { silent?: boolean }) {
+		if (!options?.silent) {
+			setLoading("history");
+			setStatus("正在加载历史任务...");
+		}
 		try {
-			const [jobs, uploads] = await Promise.all([
-				getJson<BookAnalysisJob[]>("/analysis/book/jobs?limit=10"),
-				getJson<BookUploadPreview[]>("/analysis/book/uploads?limit=10"),
-			]);
+			const { jobs, uploads } = await listBookHistory(10);
 			setBookHistory(jobs);
 			setUploadHistory(uploads);
-			setStatus(`历史已加载：${jobs.length} 个任务，${uploads.length} 个上传`);
+			if (!options?.silent) {
+				setStatus(`历史已加载：${jobs.length} 个任务，${uploads.length} 个上传`);
+			}
+		} catch (error) {
+			if (!options?.silent) {
+				setStatus((error as Error).message);
+			}
+		} finally {
+			if (!options?.silent) {
+				setLoading(null);
+			}
+		}
+	}
+
+	async function deleteHistoryJob(jobId: string) {
+		const target = bookHistory.find((job) => job.id === jobId);
+		const title = target?.inputSummary.title || jobId;
+		if (!window.confirm(`删除历史任务「${title}」？删除后不能从历史记录恢复。`)) {
+			return;
+		}
+
+		setLoading("history");
+		setStatus("正在删除历史任务...");
+		try {
+			await deleteBookAnalysisJob(jobId);
+			setBookHistory((current) => current.filter((job) => job.id !== jobId));
+			setBookAnalysisCache((current) => current.filter((entry) => entry.job.id !== jobId));
+			setSelectedResearchJobIds((current) =>
+				current.filter((selectedJobId) => selectedJobId !== jobId),
+			);
+			if (bookJob?.id === jobId) {
+				setBookJob(null);
+				setBookAnalysisResult(null);
+				setResearchComparison(null);
+				setResearchQaResult(null);
+			}
+			setStatus(`已删除历史任务：${title}`);
 		} catch (error) {
 			setStatus((error as Error).message);
 		} finally {
@@ -1680,9 +1598,7 @@ export function NovelCritiqueConsole({ view = "overview" }: { view?: WorkspaceVi
 		setLoading("research");
 		setStatus("正在读取本地研究库资产...");
 		try {
-			const result = await getJson<PersistedResearchLibrary>(
-				"/analysis/research/library?limit=50",
-			);
+			const result = await readResearchLibrary(50);
 			setPersistedResearchLibrary(result);
 			setSelectedResearchJobIds((current) => {
 				const availableIds = new Set(
@@ -1722,11 +1638,7 @@ export function NovelCritiqueConsole({ view = "overview" }: { view?: WorkspaceVi
 		setLoading("compare");
 		setStatus("正在对选中样本做多书横向对比...");
 		try {
-			const result = await postJson<ResearchComparisonResult>("/analysis/research/compare", {
-				jobIds: selectedResearchJobIds,
-				focus: comparisonFocus,
-				includePromptSeed: true,
-			});
+			const result = await compareResearchBooks(selectedResearchJobIds, comparisonFocus);
 			setResearchComparison(result);
 			setStatus(`已完成 ${result.sampleCount} 本样本横向对比。`);
 		} catch (error) {
@@ -1745,11 +1657,10 @@ export function NovelCritiqueConsole({ view = "overview" }: { view?: WorkspaceVi
 		setLoading("ask");
 		setStatus("正在基于已拆解资料回答问题...");
 		try {
-			const result = await postJson<ResearchQaResult>("/analysis/research/ask", {
+			const result = await requestResearchQa({
 				provider: providerPayload,
 				question: researchQuestion,
 				jobIds: selectedResearchJobIds.length ? selectedResearchJobIds : undefined,
-				answerMode: "beginner",
 			});
 			setResearchQaResult(result);
 			setStatus(`资料问答完成：引用 ${result.citations.length} 条资料证据。`);
@@ -1760,20 +1671,36 @@ export function NovelCritiqueConsole({ view = "overview" }: { view?: WorkspaceVi
 		}
 	}
 
-	async function openHistoryJob(jobId: string) {
-		setLoading("history");
-		setStatus("正在打开历史结果...");
+	async function openHistoryJob(
+		jobId: string,
+		options?: { silent?: boolean; preserveLoading?: boolean },
+	) {
+		if (!options?.preserveLoading) {
+			setLoading("history");
+		}
+		if (!options?.silent) {
+			setStatus("正在打开历史结果...");
+		}
 		try {
-			const job = await getJson<BookAnalysisJob>(`/analysis/book/jobs/${jobId}`);
+			const job = await readBookAnalysisJob(jobId, true);
 			setBookJob(job);
 			if (job.result) {
 				setBookAnalysisResult(job.result);
 			}
-			setStatus(`已打开任务：${job.status}`);
+			if (bookText.trim() || bookFile) {
+				rememberBookAnalysis(buildBookAnalysisCacheKey(), job, job.result ?? null);
+			}
+			if (!options?.silent) {
+				setStatus(`已打开任务：${job.status}`);
+			}
 		} catch (error) {
-			setStatus((error as Error).message);
+			if (!options?.silent) {
+				setStatus((error as Error).message);
+			}
 		} finally {
-			setLoading(null);
+			if (!options?.preserveLoading) {
+				setLoading(null);
+			}
 		}
 	}
 
@@ -1787,7 +1714,7 @@ export function NovelCritiqueConsole({ view = "overview" }: { view?: WorkspaceVi
 		setStatus(mode === "originalized" ? "正在生成原创化导出文件..." : "正在生成导出文件...");
 		try {
 			const response = await fetch(
-				`${apiBaseUrl}/analysis/book/jobs/${bookJob.id}/export?format=${format}&mode=${mode}`,
+				apiUrl(`/analysis/book/jobs/${bookJob.id}/export?format=${format}&mode=${mode}`),
 			);
 			if (!response.ok) {
 				const payload = (await response.json()) as ApiEnvelope<unknown>;
@@ -1817,13 +1744,22 @@ export function NovelCritiqueConsole({ view = "overview" }: { view?: WorkspaceVi
 			return;
 		}
 
-		const text = await file.text();
 		setBookFile(file);
 		setBookTitle(file.name.replace(/\.[^.]+$/, ""));
-		setBookText(text);
 		setBookUpload(null);
 		setBookAnalysisResult(null);
 		setBookJob(null);
+
+		if (file.size > LARGE_BOOK_INLINE_BYTES) {
+			setBookText("");
+			setStatus(
+				`已选择大文件 ${file.name}（${formatFileSize(file.size)}）。为避免浏览器卡顿，不再展开全文，后续会直接上传并拆解。`,
+			);
+			return;
+		}
+
+		const text = await file.text();
+		setBookText(text);
 	}
 
 	return (
@@ -1844,6 +1780,8 @@ export function NovelCritiqueConsole({ view = "overview" }: { view?: WorkspaceVi
 					quickLoading={loading === "quick"}
 					quickElapsedSeconds={quickReviewElapsedSeconds}
 					quickReviewResult={quickReviewResult}
+					previousQuickReviewResult={previousQuickReviewResult}
+					quickReviewGenre={quickReviewGenre}
 					chapterText={chapterText}
 					chapterCompletion={chapterCompletion}
 					nextChapterAction={nextChapterAction}
@@ -1855,18 +1793,22 @@ export function NovelCritiqueConsole({ view = "overview" }: { view?: WorkspaceVi
 					researchSourceCount={researchSourceCount}
 					graphNodeCount={graphNodeCount}
 					chapterProjectSteps={chapterProjectSteps}
-					platformLabel={optionLabel(platformOptions, platform)}
-					readingModeLabel={optionLabel(readingModeOptions, readingMode)}
+					platformLabel={platformLabel}
+					readingModeLabel={readingModeLabel}
 					competitionLevelLabel={optionLabel(competitionLevelOptions, competitionLevel)}
 					pushStageLabel={optionLabel(pushStageOptions, pushStage)}
 					competitionNotes={competitionNotes}
 					bookTitle={bookUpload?.title || bookTitle || "未填写书名"}
 					bookCompletion={bookCompletion}
+					bookProgressDetail={bookProgressDetail ?? undefined}
 					onChapterTextChange={(value) => {
 						chapterDraftTouchedRef.current = true;
 						setChapterText(value);
 					}}
+					onQuickReviewGenreChange={setQuickReviewGenre}
 					onRunQuickExperience={runQuickExperience}
+					onRerunQuickExperience={() => runQuickExperience(true)}
+					hasQuickReviewCache={Boolean(quickReviewCacheHit)}
 					onUseExampleChapter={useExampleChapter}
 					onOpenModel={() => openView("provider")}
 					onOpenCritique={() => openView("chapter")}
@@ -1953,8 +1895,9 @@ export function NovelCritiqueConsole({ view = "overview" }: { view?: WorkspaceVi
 
 					<div className="mt-5 grid gap-4 md:grid-cols-3">
 						<div className="space-y-2">
-							<Label>使用方式</Label>
+							<Label htmlFor="provider-kind">使用方式</Label>
 							<select
+								id="provider-kind"
 								className="h-10 w-full rounded-md border border-input bg-background px-3 text-sm"
 								value={provider.kind}
 								onChange={(event) => {
@@ -1974,8 +1917,9 @@ export function NovelCritiqueConsole({ view = "overview" }: { view?: WorkspaceVi
 							</select>
 						</div>
 						<div className="space-y-2">
-							<Label>模型服务</Label>
+							<Label htmlFor="provider-preset">模型服务</Label>
 							<select
+								id="provider-preset"
 								className="h-10 w-full rounded-md border border-input bg-background px-3 text-sm"
 								value={provider.preset}
 								onChange={(event) =>
@@ -1991,11 +1935,13 @@ export function NovelCritiqueConsole({ view = "overview" }: { view?: WorkspaceVi
 						</div>
 						<div className="space-y-2">
 							<div className="flex items-center gap-1">
-								<Label>模型（Model）</Label>
+								<Label htmlFor="provider-model">模型（Model）</Label>
 								<FieldHelp text="不同模型擅长的内容、速度和稳定性不同。共享站的模型由服务端配置；付费模型会使用这里选择或填写的 Model。" />
 							</div>
 							{providerModelOptions.length ? (
 								<select
+									id="provider-model-option"
+									aria-label="选择预设模型"
 									className="h-10 w-full rounded-md border border-input bg-background px-3 text-sm"
 									value={selectedModelOption}
 									onChange={(event) => {
@@ -2017,6 +1963,7 @@ export function NovelCritiqueConsole({ view = "overview" }: { view?: WorkspaceVi
 								</select>
 							) : null}
 							<Input
+								id="provider-model"
 								value={provider.model}
 								onChange={(event) =>
 									setProvider((current) => ({
@@ -2033,8 +1980,9 @@ export function NovelCritiqueConsole({ view = "overview" }: { view?: WorkspaceVi
 							/>
 						</div>
 						<div className="space-y-2">
-							<Label>Base URL（高级）</Label>
+							<Label htmlFor="provider-base-url">Base URL（高级）</Label>
 							<Input
+								id="provider-base-url"
 								value={provider.baseUrl}
 								onChange={(event) =>
 									setProvider((current) => ({
@@ -2050,7 +1998,7 @@ export function NovelCritiqueConsole({ view = "overview" }: { view?: WorkspaceVi
 							/>
 						</div>
 						<div className="space-y-2">
-							<Label>API Key（高级）</Label>
+							<Label htmlFor="provider-api-key">API Key（高级）</Label>
 							{isBackendFreeProvider ? (
 								<div className="min-h-10 rounded-md border border-border bg-muted px-3 py-2 text-sm leading-6 text-muted-foreground">
 									<p className="font-medium text-foreground">无需填写</p>
@@ -2061,6 +2009,7 @@ export function NovelCritiqueConsole({ view = "overview" }: { view?: WorkspaceVi
 								</div>
 							) : (
 								<Input
+									id="provider-api-key"
 									type="password"
 									value={provider.apiKey}
 									onChange={(event) =>
@@ -2088,6 +2037,8 @@ export function NovelCritiqueConsole({ view = "overview" }: { view?: WorkspaceVi
 					quickLoading={loading === "quick"}
 					quickElapsedSeconds={quickReviewElapsedSeconds}
 					quickReviewResult={quickReviewResult}
+					previousQuickReviewResult={previousQuickReviewResult}
+					quickReviewGenre={quickReviewGenre}
 					importReferenceFile={importReferenceFile}
 					onInferReferenceProfile={inferReferenceProfileFromModel}
 					onReferenceTextChange={(value) => {
@@ -2097,13 +2048,20 @@ export function NovelCritiqueConsole({ view = "overview" }: { view?: WorkspaceVi
 						resetReferenceProfileProgress();
 						resetScoreProgress();
 					}}
+					onQuickReviewGenreChange={setQuickReviewGenre}
 					onRunQuickExperience={runQuickExperience}
+					onRerunQuickExperience={() => runQuickExperience(true)}
+					hasQuickReviewCache={Boolean(quickReviewCacheHit)}
 					onUseExampleChapter={useExampleChapter}
 					onUseExampleReference={useExampleReference}
 					onOpenModel={() => openView("provider")}
 					onOpenBook={() => openView("book")}
 					onBuildRubric={buildRubric}
+					onRebuildRubric={() => buildRubric(true)}
 					onScoreChapter={scoreChapter}
+					onRescoreChapter={() => scoreChapter(true)}
+					hasRubricCache={Boolean(rubricCacheHit)}
+					hasScoreCache={Boolean(scoreCacheHit)}
 					onPlatformStrategyChange={(patch) => {
 						platformStrategyTouchedRef.current = true;
 						if (patch.recommendationSignals !== undefined) {
@@ -2176,25 +2134,39 @@ export function NovelCritiqueConsole({ view = "overview" }: { view?: WorkspaceVi
 									) : null}
 									上传并预览章节
 								</Button>
-								<Button onClick={analyzeBook} disabled={loading !== null}>
+								<Button
+									onClick={() => void analyzeBook()}
+									disabled={loading !== null}
+								>
 									{loading === "book" ? (
 										<Loader2 className="mr-2 size-4 animate-spin" />
 									) : null}
 									启动整书拆解
 								</Button>
+								{bookAnalysisCacheHit ? (
+									<Button
+										variant="outline"
+										onClick={() => analyzeBook(true)}
+										disabled={loading !== null}
+									>
+										重新拆解
+									</Button>
+								) : null}
 							</div>
 						</div>
 						<div className="mt-5 grid gap-4 md:grid-cols-[1fr_180px]">
 							<div className="space-y-2">
-								<Label>书名</Label>
+								<Label htmlFor="book-title">书名</Label>
 								<Input
+									id="book-title"
 									value={bookTitle}
 									onChange={(event) => setBookTitle(event.target.value)}
 								/>
 							</div>
 							<div className="space-y-2">
-								<Label>题材</Label>
+								<Label htmlFor="book-genre">题材</Label>
 								<select
+									id="book-genre"
 									className="h-10 w-full rounded-md border border-input bg-background px-3 text-sm"
 									value={bookGenre}
 									onChange={(event) => setBookGenre(event.target.value)}
@@ -2209,18 +2181,31 @@ export function NovelCritiqueConsole({ view = "overview" }: { view?: WorkspaceVi
 							</div>
 						</div>
 						<div className="mt-4 space-y-2">
-							<Label>上传 TXT</Label>
+							<Label htmlFor="book-file">上传 TXT</Label>
 							<Input
+								id="book-file"
 								type="file"
 								accept=".txt,text/plain"
 								onChange={(event) => readBookFile(event.target.files?.[0])}
 							/>
 						</div>
-						<textarea
-							className="mt-4 min-h-56 w-full resize-y rounded-md border border-input bg-background p-3 text-sm leading-6"
-							value={bookText}
-							onChange={(event) => setBookText(event.target.value)}
-						/>
+						{bookFileTooLargeForInlinePreview ? (
+							<div className="mt-4 rounded-md border border-border bg-muted p-4 text-sm leading-6 text-muted-foreground">
+								<div>已选择文件：{bookFile?.name}</div>
+								<div>
+									文件大小：{bookFile ? formatFileSize(bookFile.size) : "-"}
+								</div>
+								<div>当前模式：直接上传并拆解，不在浏览器中展开全文。</div>
+							</div>
+						) : (
+							<textarea
+								id="book-text"
+								aria-label="整书文本"
+								className="mt-4 min-h-56 w-full resize-y rounded-md border border-input bg-background p-3 text-sm leading-6"
+								value={bookText}
+								onChange={(event) => setBookText(event.target.value)}
+							/>
+						)}
 					</section>
 
 					<BookUploadPreviewPanel upload={bookUpload} />
@@ -2247,7 +2232,7 @@ export function NovelCritiqueConsole({ view = "overview" }: { view?: WorkspaceVi
 							</div>
 						</div>
 					</section>
-					<BookAnalysisPanel result={bookAnalysisResult} />
+					<BookAnalysisPanel result={bookAnalysisResult} job={bookJob} />
 				</>
 			) : null}
 
@@ -2259,9 +2244,10 @@ export function NovelCritiqueConsole({ view = "overview" }: { view?: WorkspaceVi
 						loading={loading}
 						onLoadHistory={loadHistory}
 						onOpenJob={openHistoryJob}
+						onDeleteJob={deleteHistoryJob}
 					/>
 					<BookJobPanel job={bookJob} loading={loading} onResume={resumeBookAnalysis} />
-					<BookAnalysisPanel result={bookAnalysisResult} />
+					<BookAnalysisPanel result={bookAnalysisResult} job={bookJob} />
 				</>
 			) : null}
 
@@ -2284,12 +2270,14 @@ function BookHistoryPanel({
 	loading,
 	onLoadHistory,
 	onOpenJob,
+	onDeleteJob,
 }: {
 	jobs: BookAnalysisJob[];
 	uploads: BookUploadPreview[];
 	loading: string | null;
 	onLoadHistory: () => void;
 	onOpenJob: (jobId: string) => void;
+	onDeleteJob: (jobId: string) => void;
 }) {
 	return (
 		<section className="rounded-md border border-border bg-card p-5">
@@ -2313,22 +2301,48 @@ function BookHistoryPanel({
 					<p className="font-medium">最近任务</p>
 					<div className="mt-3 max-h-72 overflow-auto space-y-2 text-sm">
 						{jobs.length ? (
-							jobs.map((job) => (
-								<button
-									key={job.id}
-									type="button"
-									onClick={() => onOpenJob(job.id)}
-									className="w-full rounded-md border border-border bg-card px-3 py-2 text-left hover:bg-secondary"
-								>
-									<div className="flex items-center justify-between gap-3">
-										<span className="font-medium">
-											{job.inputSummary.title}
-										</span>
-										<span>{job.status}</span>
+							jobs.map((job) => {
+								const canDelete =
+									job.status === "succeeded" || job.status === "failed";
+								return (
+									<div
+										key={job.id}
+										className="flex items-start gap-2 rounded-md border border-border bg-card px-3 py-2"
+									>
+										<button
+											type="button"
+											onClick={() => onOpenJob(job.id)}
+											className="min-w-0 flex-1 text-left hover:text-primary"
+										>
+											<div className="flex items-center justify-between gap-3">
+												<span className="truncate font-medium">
+													{job.inputSummary.title}
+												</span>
+												<span className="shrink-0">{job.status}</span>
+											</div>
+											<p className="mt-1 truncate text-xs text-muted-foreground">
+												{job.id}
+											</p>
+										</button>
+										<Button
+											type="button"
+											variant="ghost"
+											size="icon"
+											className="size-8 shrink-0 text-muted-foreground hover:text-destructive"
+											onClick={() => onDeleteJob(job.id)}
+											disabled={loading !== null || !canDelete}
+											title={
+												canDelete
+													? "删除这条历史任务"
+													: "运行中的任务暂不能删除"
+											}
+											aria-label={`删除历史任务 ${job.inputSummary.title}`}
+										>
+											<Trash2 className="size-4" />
+										</Button>
 									</div>
-									<p className="mt-1 text-xs text-muted-foreground">{job.id}</p>
-								</button>
-							))
+								);
+							})
 						) : (
 							<p className="text-muted-foreground">暂无历史任务。</p>
 						)}
@@ -2438,9 +2452,13 @@ function BookJobPanel({
 
 	const percent =
 		job.progress.total > 0 ? Math.round((job.progress.current / job.progress.total) * 100) : 0;
+	const progressDetail = getBookJobProgressDetail(job);
 	const canResume = job.status === "failed" && Boolean(job.partialResult);
-	const resumeChapter = job.partialResult
-		? Math.min(job.partialResult.mapCount + 1, job.partialResult.totalChapters)
+	const resumeOutlineChunk = job.partialResult
+		? Math.min(
+				(job.partialResult.outlineCount ?? job.partialResult.mapCount) + 1,
+				job.partialResult.totalChapters,
+			)
 		: 1;
 
 	return (
@@ -2476,6 +2494,43 @@ function BookJobPanel({
 				</div>
 				<p className="mt-3 text-sm text-muted-foreground">{job.progress.message}</p>
 			</div>
+			{progressDetail ? (
+				<div className="mt-4 grid gap-4 md:grid-cols-2">
+					<div className="rounded-md border border-border bg-background p-4">
+						<div className="mb-2 flex items-center justify-between text-xs">
+							<span className="text-muted-foreground">轻索引</span>
+							<span className="font-medium">
+								{progressDetail.outline.current}/{progressDetail.outline.total}
+							</span>
+						</div>
+						<div className="h-2 overflow-hidden rounded-full bg-secondary">
+							<div
+								className="h-full rounded-full bg-primary transition-all"
+								style={{ width: `${progressDetail.outline.percent}%` }}
+							/>
+						</div>
+					</div>
+					<div className="rounded-md border border-border bg-background p-4">
+						<div className="mb-2 flex items-center justify-between text-xs">
+							<span className="text-muted-foreground">深拆重点片段</span>
+							<span className="font-medium">
+								{progressDetail.deep.current}/{progressDetail.deep.total}
+							</span>
+						</div>
+						<div className="h-2 overflow-hidden rounded-full bg-secondary">
+							<div
+								className="h-full rounded-full bg-primary transition-all"
+								style={{ width: `${progressDetail.deep.percent}%` }}
+							/>
+						</div>
+					</div>
+					{progressDetail.strategy ? (
+						<p className="md:col-span-2 text-xs leading-5 text-muted-foreground">
+							{progressDetail.strategy}
+						</p>
+					) : null}
+				</div>
+			) : null}
 			{job.preprocessing ? (
 				<div className="mt-4 grid gap-3 text-sm sm:grid-cols-3">
 					<div className="rounded-md border border-border bg-background p-3">
@@ -2501,13 +2556,14 @@ function BookJobPanel({
 			{job.partialResult ? (
 				<div className="mt-4 rounded-md border border-emerald-500/30 bg-emerald-500/10 p-4 text-sm">
 					<div className="flex items-center gap-2">
-						<CheckCircle2 className="size-4 text-emerald-400" />
+						<CheckCircle2 className="size-4 text-success-foreground" />
 						<p className="font-semibold">已保存中间拆解结果</p>
 					</div>
 					<div className="mt-3 grid gap-3 md:grid-cols-3">
 						<p>
-							<span className="text-muted-foreground">已完成章节：</span>
-							{job.partialResult.mapCount}/{job.partialResult.totalChapters}
+							<span className="text-muted-foreground">轻索引：</span>
+							{job.partialResult.outlineCount ?? job.partialResult.mapCount}/
+							{job.partialResult.totalChapters}
 						</p>
 						<p>
 							<span className="text-muted-foreground">保存时间：</span>
@@ -2518,13 +2574,21 @@ function BookJobPanel({
 							{job.partialResult.artifactDir}
 						</p>
 					</div>
+					{job.partialResult.deepTargetOrders?.length ? (
+						<p className="mt-2 text-xs leading-5 text-muted-foreground">
+							深拆重点片段 {job.partialResult.deepCompletedCount ?? 0}/
+							{job.partialResult.deepTargetOrders.length}
+						</p>
+					) : null}
 					<p className="mt-3 text-xs leading-5 text-muted-foreground">
 						{job.partialResult.notice}
 					</p>
 					{canResume ? (
 						<p className="mt-2 text-xs leading-5 text-foreground">
-							已完成 {job.partialResult.mapCount}/{job.partialResult.totalChapters}
-							，从第 {resumeChapter} 章继续。
+							将从已保存状态继续。当前轻索引已完成{" "}
+							{job.partialResult.outlineCount ?? job.partialResult.mapCount}/
+							{job.partialResult.totalChapters}
+							，下一段从第 {resumeOutlineChunk} 个片段附近恢复。
 						</p>
 					) : null}
 				</div>

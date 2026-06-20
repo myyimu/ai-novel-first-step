@@ -17,8 +17,25 @@ spec:
       containers:
         - name: api
           image: api:latest
+          env:
+            - name: NODE_ENV
+              value: production
+            - name: PORT
+              value: "3001"
+            - name: ALLOWED_ORIGINS
+              value: http://web:3000
+            - name: DATABASE_URL
+              valueFrom:
+                secretKeyRef:
+                  name: api-secrets
+                  key: database-url
+            - name: JWT_SECRET
+              valueFrom:
+                secretKeyRef:
+                  name: api-secrets
+                  key: jwt-secret
           ports:
-            - containerPort: 3000
+            - containerPort: 3001
               protocol: TCP
 ---
 apiVersion: v1
@@ -30,7 +47,7 @@ spec:
   selector:
     app: api
   ports:
-    - port: 3000
-      targetPort: 3000
+    - port: 3001
+      targetPort: 3001
       protocol: TCP
       name: http

@@ -17,16 +17,22 @@ async function bootstrap() {
   app.use(urlencoded({ extended: true, limit: "10mb" }));
 
   // Enable CORS with custom configuration
-  const allowedOrigins = process.env.ALLOWED_ORIGINS?.split(",");
-  if (!allowedOrigins) {
+  const allowedOrigins = process.env.ALLOWED_ORIGINS?.split(",")
+    .map((origin) => origin.trim())
+    .filter(Boolean);
+  if (!allowedOrigins?.length) {
+    if (process.env.NODE_ENV === "production") {
+      throw new Error("ALLOWED_ORIGINS must be set in production.");
+    }
+
     logger.warn(
       "ALLOWED_ORIGINS not set, CORS will allow all origins. Do NOT use in production!",
     );
   }
   app.enableCors({
-    origin: allowedOrigins || "*",
+    origin: allowedOrigins?.length ? allowedOrigins : "*",
     methods: "GET,HEAD,PUT,PATCH,POST,DELETE,OPTIONS",
-    credentials: true,
+    credentials: Boolean(allowedOrigins?.length),
   });
 
   // Set global prefix for all routes except /metrics and /health

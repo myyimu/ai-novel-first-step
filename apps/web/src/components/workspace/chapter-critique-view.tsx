@@ -63,16 +63,25 @@ export interface ChapterCritiqueViewProps {
 	quickLoading: boolean;
 	quickElapsedSeconds: number;
 	quickReviewResult: QuickReviewResult | null;
+	previousQuickReviewResult?: QuickReviewResult | null;
+	quickReviewGenre: string;
 	importReferenceFile: (event: ChangeEvent<HTMLInputElement>) => void;
 	onInferReferenceProfile: (text: string, fileName?: string) => void;
 	onReferenceTextChange: (value: string) => void;
+	onQuickReviewGenreChange: (value: string) => void;
 	onRunQuickExperience: () => void;
+	onRerunQuickExperience: () => void;
+	hasQuickReviewCache: boolean;
 	onUseExampleChapter: () => void;
 	onUseExampleReference: () => void;
 	onOpenModel: () => void;
 	onOpenBook: () => void;
 	onBuildRubric: () => void;
+	onRebuildRubric: () => void;
 	onScoreChapter: () => void;
+	onRescoreChapter: () => void;
+	hasRubricCache: boolean;
+	hasScoreCache: boolean;
 	onPlatformStrategyChange: (patch: PlatformStrategyPatch) => void;
 	onChapterDraftChange: (patch: ChapterDraftPatch) => void;
 }
@@ -185,24 +194,27 @@ function PlatformStrategyFields({
 			</summary>
 			<div className="mt-4 grid gap-4 md:grid-cols-2">
 				<div className="space-y-2">
-					<Label>推荐信号假设</Label>
+					<Label htmlFor="recommendation-signals">推荐信号假设</Label>
 					<Input
+						id="recommendation-signals"
 						value={recommendationSignals}
 						onChange={(event) => setRecommendationSignals(event.target.value)}
 						placeholder="点击率，有效阅读，完读，加书架，追更"
 					/>
 				</div>
 				<div className="space-y-2">
-					<Label>可能入口/标签</Label>
+					<Label htmlFor="traffic-entry">可能入口/标签</Label>
 					<Input
+						id="traffic-entry"
 						value={trafficEntry}
 						onChange={(event) => setTrafficEntry(event.target.value)}
 						placeholder="推荐流，分类页，关键词标签"
 					/>
 				</div>
 				<div className="space-y-2">
-					<Label>赛道竞争程度</Label>
+					<Label htmlFor="competition-level">赛道竞争程度</Label>
 					<select
+						id="competition-level"
 						className="h-10 w-full rounded-md border border-input bg-background px-3 text-sm"
 						value={competitionLevel}
 						onChange={(event) => setCompetitionLevel(event.target.value)}
@@ -215,8 +227,9 @@ function PlatformStrategyFields({
 					</select>
 				</div>
 				<div className="space-y-2">
-					<Label>推流阶段</Label>
+					<Label htmlFor="push-stage">推流阶段</Label>
 					<select
+						id="push-stage"
 						className="h-10 w-full rounded-md border border-input bg-background px-3 text-sm"
 						value={pushStage}
 						onChange={(event) => setPushStage(event.target.value)}
@@ -229,8 +242,9 @@ function PlatformStrategyFields({
 					</select>
 				</div>
 				<div className="space-y-2 md:col-span-2">
-					<Label>竞争备注</Label>
+					<Label htmlFor="competition-notes">竞争备注</Label>
 					<Input
+						id="competition-notes"
 						value={competitionNotes}
 						onChange={(event) => setCompetitionNotes(event.target.value)}
 						placeholder="同质化程度、差异化角度、对标作品等"
@@ -247,16 +261,25 @@ export function ChapterCritiqueView({
 	quickLoading,
 	quickElapsedSeconds,
 	quickReviewResult,
+	previousQuickReviewResult,
+	quickReviewGenre,
 	importReferenceFile,
 	onInferReferenceProfile,
 	onReferenceTextChange,
+	onQuickReviewGenreChange,
 	onRunQuickExperience,
+	onRerunQuickExperience,
+	hasQuickReviewCache,
 	onUseExampleChapter,
 	onUseExampleReference,
 	onOpenModel,
 	onOpenBook,
 	onBuildRubric,
+	onRebuildRubric,
 	onScoreChapter,
+	onRescoreChapter,
+	hasRubricCache,
+	hasScoreCache,
 	onPlatformStrategyChange,
 	onChapterDraftChange,
 }: ChapterCritiqueViewProps) {
@@ -478,6 +501,7 @@ export function ChapterCritiqueView({
 				]
 			: []),
 	];
+	const fullCritiqueDefaultOpen = Boolean(referenceText.trim() || rubricResult || scoreResult);
 
 	function toggleAiSelfTest(testId: AiSelfTestId) {
 		setEnabledAiSelfTests((current) =>
@@ -490,15 +514,8 @@ export function ChapterCritiqueView({
 	return (
 		<>
 			<WorkflowGuide
-				steps={[
-					"先做快速点评",
-					"校准平台和读者",
-					"导入成熟章节",
-					"AI 识别定位",
-					"生成评分标准",
-					"质检自己的章节",
-				]}
-				note="章节质检先用快速点评判断方向，再用评分标准做完整评分；两者共用同一份章节正文，避免重复填内容。"
+				steps={["粘贴章节", "找最大流失点", "复制改稿 Prompt", "需要时再开高级质检"]}
+				note="新手默认只走前三步。完整评分、参考样本和数据快照都保留在高级质检里，用于已经跑通过急诊的章节。"
 			/>
 			<QuickExperiencePanel
 				chapterText={chapterText}
@@ -506,8 +523,13 @@ export function ChapterCritiqueView({
 				loading={quickLoading}
 				elapsedSeconds={quickElapsedSeconds}
 				quickReviewResult={quickReviewResult}
+				previousQuickReviewResult={previousQuickReviewResult}
+				quickReviewGenre={quickReviewGenre}
 				onChapterTextChange={(value) => onChapterDraftChange({ chapterText: value })}
+				onQuickReviewGenreChange={onQuickReviewGenreChange}
 				onRun={onRunQuickExperience}
+				onRerun={onRerunQuickExperience}
+				hasCachedResult={hasQuickReviewCache}
 				onUseExample={onUseExampleChapter}
 				onOpenModel={onOpenModel}
 				onOpenCritique={() =>
@@ -517,103 +539,198 @@ export function ChapterCritiqueView({
 				}
 				onOpenBook={onOpenBook}
 			/>
-			<section
+			<details
 				id="full-chapter-critique"
 				className="rounded-md border border-border bg-card p-5"
+				open={fullCritiqueDefaultOpen}
 			>
-				<div className="flex items-center gap-2">
-					<Sparkles className="size-5 text-primary" />
-					<h2 className="text-lg font-semibold">
-						2. 平台风格画像
-						<FieldHelp text="不同平台读者接受的节奏、表达和钩子密度不同。这里用于让评分标准贴近目标平台。" />
-					</h2>
-				</div>
-				<div className="mt-5 grid gap-4 md:grid-cols-3">
-					<div className="space-y-2">
-						<Label>目标平台</Label>
-						<select
-							className="h-10 w-full rounded-md border border-input bg-background px-3 text-sm"
-							value={platform}
-							onChange={(event) => setPlatform(event.target.value)}
-						>
-							<option value="qidian">起点</option>
-							<option value="fanqie">番茄</option>
-							<option value="jinjiang">晋江</option>
-							<option value="qimao">七猫</option>
-							<option value="wechat-short">微信短篇/小程序文</option>
-							<option value="other">其他</option>
-						</select>
+				<summary className="flex cursor-pointer list-none items-start gap-3">
+					<Sparkles className="mt-0.5 size-5 text-primary" />
+					<div className="min-w-0">
+						<h2 className="text-lg font-semibold">高级质检：样本、评分标准和证据链</h2>
+						<p className="mt-1 text-sm leading-6 text-muted-foreground">
+							当急诊已经给出方向，再打开这里导入成熟样本、生成 Rubric、做完整评分。
+						</p>
 					</div>
-					<div className="space-y-2">
-						<Label>目标读者</Label>
-						<select
-							className="h-10 w-full rounded-md border border-input bg-background px-3 text-sm"
-							value={audience}
-							onChange={(event) => setAudience(event.target.value)}
-						>
-							<option value="male-fast-paced">男频快节奏爽文</option>
-							<option value="female-emotional">女频情绪流</option>
-							<option value="setting-heavy">设定党/世界观</option>
-							<option value="light-reader">快节奏小白文</option>
-							<option value="suspense-brainstorm">悬疑脑洞</option>
-							<option value="other">其他</option>
-						</select>
-					</div>
-					<div className="space-y-2">
-						<Label>阅读场景</Label>
-						<select
-							className="h-10 w-full rounded-md border border-input bg-background px-3 text-sm"
-							value={readingMode}
-							onChange={(event) => setReadingMode(event.target.value)}
-						>
-							<option value="long-serialization">长篇追更</option>
-							<option value="mobile-fragmented">移动端碎片阅读</option>
-							<option value="short-paid">短篇付费</option>
-							<option value="other">其他</option>
-						</select>
-					</div>
-				</div>
-				<PlatformStrategyFields
-					recommendationSignals={recommendationSignals}
-					setRecommendationSignals={(value) =>
-						onPlatformStrategyChange({ recommendationSignals: value })
-					}
-					trafficEntry={trafficEntry}
-					setTrafficEntry={(value) => onPlatformStrategyChange({ trafficEntry: value })}
-					competitionLevel={competitionLevel}
-					setCompetitionLevel={(value) =>
-						onPlatformStrategyChange({ competitionLevel: value })
-					}
-					pushStage={pushStage}
-					setPushStage={(value) => onPlatformStrategyChange({ pushStage: value })}
-					competitionNotes={competitionNotes}
-					setCompetitionNotes={(value) =>
-						onPlatformStrategyChange({ competitionNotes: value })
-					}
-				/>
-			</section>
-
-			<section className="rounded-md border border-border bg-card p-5">
-				<div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
+					<span className="ml-auto shrink-0 rounded-md border border-border px-2 py-1 text-xs text-muted-foreground">
+						可折叠
+					</span>
+				</summary>
+				<section className="mt-5 rounded-md border border-border bg-background p-5">
 					<div className="flex items-center gap-2">
-						<BookOpenCheck className="size-5 text-primary" />
-						<h2 className="text-lg font-semibold">3. 导入成熟章节</h2>
+						<Sparkles className="size-5 text-primary" />
+						<h2 className="text-lg font-semibold">
+							2. 平台风格画像
+							<FieldHelp text="不同平台读者接受的节奏、表达和钩子密度不同。这里用于让评分标准贴近目标平台。" />
+						</h2>
 					</div>
-					<Button type="button" variant="outline" onClick={onUseExampleReference}>
-						填入示例参考章节
-					</Button>
-				</div>
+					<div className="mt-5 grid gap-4 md:grid-cols-3">
+						<div className="space-y-2">
+							<Label htmlFor="target-platform">目标平台</Label>
+							<select
+								id="target-platform"
+								className="h-10 w-full rounded-md border border-input bg-background px-3 text-sm"
+								value={platform}
+								onChange={(event) => setPlatform(event.target.value)}
+							>
+								<option value="qidian">起点</option>
+								<option value="fanqie">番茄</option>
+								<option value="jinjiang">晋江</option>
+								<option value="qimao">七猫</option>
+								<option value="wechat-short">微信短篇/小程序文</option>
+								<option value="other">其他</option>
+							</select>
+						</div>
+						<div className="space-y-2">
+							<Label htmlFor="target-audience">目标读者</Label>
+							<select
+								id="target-audience"
+								className="h-10 w-full rounded-md border border-input bg-background px-3 text-sm"
+								value={audience}
+								onChange={(event) => setAudience(event.target.value)}
+							>
+								<option value="male-fast-paced">男频快节奏爽文</option>
+								<option value="female-emotional">女频情绪流</option>
+								<option value="setting-heavy">设定党/世界观</option>
+								<option value="light-reader">快节奏小白文</option>
+								<option value="suspense-brainstorm">悬疑脑洞</option>
+								<option value="other">其他</option>
+							</select>
+						</div>
+						<div className="space-y-2">
+							<Label htmlFor="reading-mode">阅读场景</Label>
+							<select
+								id="reading-mode"
+								className="h-10 w-full rounded-md border border-input bg-background px-3 text-sm"
+								value={readingMode}
+								onChange={(event) => setReadingMode(event.target.value)}
+							>
+								<option value="long-serialization">长篇追更</option>
+								<option value="mobile-fragmented">移动端碎片阅读</option>
+								<option value="short-paid">短篇付费</option>
+								<option value="other">其他</option>
+							</select>
+						</div>
+					</div>
+					<PlatformStrategyFields
+						recommendationSignals={recommendationSignals}
+						setRecommendationSignals={(value) =>
+							onPlatformStrategyChange({ recommendationSignals: value })
+						}
+						trafficEntry={trafficEntry}
+						setTrafficEntry={(value) =>
+							onPlatformStrategyChange({ trafficEntry: value })
+						}
+						competitionLevel={competitionLevel}
+						setCompetitionLevel={(value) =>
+							onPlatformStrategyChange({ competitionLevel: value })
+						}
+						pushStage={pushStage}
+						setPushStage={(value) => onPlatformStrategyChange({ pushStage: value })}
+						competitionNotes={competitionNotes}
+						setCompetitionNotes={(value) =>
+							onPlatformStrategyChange({ competitionNotes: value })
+						}
+					/>
+				</section>
 
-				<div className="mt-5 grid gap-4">
-					<div className="space-y-2 rounded-md border border-border bg-background p-4">
-						<Label htmlFor="reference-file">上传成熟章节文件</Label>
-						<div className="grid gap-3 sm:grid-cols-[1fr_auto] sm:items-center">
-							<Input
-								id="reference-file"
-								type="file"
-								accept=".txt,.md,text/plain,text/markdown"
-								onChange={importReferenceFile}
-							/>
+				<section className="rounded-md border border-border bg-card p-5">
+					<div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
+						<div className="flex items-center gap-2">
+							<BookOpenCheck className="size-5 text-primary" />
+							<h2 className="text-lg font-semibold">3. 导入成熟章节</h2>
+						</div>
+						<Button type="button" variant="outline" onClick={onUseExampleReference}>
+							填入示例参考章节
+						</Button>
+					</div>
+
+					<div className="mt-5 grid gap-4">
+						<div className="space-y-2 rounded-md border border-border bg-background p-4">
+							<Label htmlFor="reference-file">上传成熟章节文件</Label>
+							<div className="grid gap-3 sm:grid-cols-[1fr_auto] sm:items-center">
+								<Input
+									id="reference-file"
+									type="file"
+									accept=".txt,.md,text/plain,text/markdown"
+									onChange={importReferenceFile}
+								/>
+								<Button
+									type="button"
+									variant="outline"
+									onClick={() =>
+										onInferReferenceProfile(
+											referenceText,
+											referenceFileName || undefined,
+										)
+									}
+									disabled={!referenceText.trim() || loading !== null}
+								>
+									{loading === "profile" ? (
+										<Loader2 className="mr-2 size-4 animate-spin" />
+									) : (
+										<Upload className="mr-2 size-4" />
+									)}
+									AI 识别当前文本
+								</Button>
+							</div>
+							{referenceFileName ? (
+								<p className="text-xs text-muted-foreground">
+									已导入：{referenceFileName}
+								</p>
+							) : (
+								<p className="text-xs text-muted-foreground">
+									支持 TXT 和常见文本文件。导入后会用 AI
+									识别标题、题材和市场定位。
+								</p>
+							)}
+						</div>
+						<div className="grid gap-4 md:grid-cols-[1fr_160px]">
+							<div className="space-y-2">
+								<Label htmlFor="reference-title">参考章节标题</Label>
+								<Input
+									id="reference-title"
+									value={referenceTitle}
+									onChange={(event) => setReferenceTitle(event.target.value)}
+								/>
+							</div>
+							<div className="space-y-2">
+								<Label htmlFor="reference-genre">题材</Label>
+								<select
+									id="reference-genre"
+									className="h-10 w-full rounded-md border border-input bg-background px-3 text-sm"
+									value={genre}
+									onChange={(event) => setGenre(event.target.value)}
+								>
+									<option value="xuanhuan">玄幻</option>
+									<option value="urban">都市</option>
+									<option value="romance">言情</option>
+									<option value="suspense">悬疑</option>
+									<option value="infinite-flow">无限流</option>
+									<option value="other">其他</option>
+								</select>
+							</div>
+						</div>
+						<textarea
+							id="reference-text"
+							aria-label="参考章节正文"
+							className="min-h-48 w-full resize-y rounded-md border border-input bg-background p-3 text-sm leading-6"
+							value={referenceText}
+							onChange={(event) => onReferenceTextChange(event.target.value)}
+						/>
+					</div>
+				</section>
+
+				<section className="rounded-md border border-border bg-card p-5">
+					<div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
+						<div className="flex items-center gap-2">
+							<Sparkles className="size-5 text-primary" />
+							<h2 className="text-lg font-semibold">
+								4. AI 识别的市场定位
+								<FieldHelp text="分类、主题、标签和关键词优先由 AI 从参考章节识别；如果当前模型不可用，系统不会用粗糙本地规则覆盖字段，请切换模型重试或手动填写。" />
+							</h2>
+						</div>
+						<div className="flex flex-wrap gap-2">
 							<Button
 								type="button"
 								variant="outline"
@@ -628,287 +745,251 @@ export function ChapterCritiqueView({
 								{loading === "profile" ? (
 									<Loader2 className="mr-2 size-4 animate-spin" />
 								) : (
-									<Upload className="mr-2 size-4" />
+									<Sparkles className="mr-2 size-4" />
 								)}
-								AI 识别当前文本
+								AI 重新识别
 							</Button>
+							<Button onClick={onBuildRubric} disabled={loading !== null}>
+								{loading === "rubric" ? (
+									<Loader2 className="mr-2 size-4 animate-spin" />
+								) : null}
+								生成评分标准
+							</Button>
+							{hasRubricCache ? (
+								<Button
+									variant="outline"
+									onClick={onRebuildRubric}
+									disabled={loading !== null}
+								>
+									重新分析
+								</Button>
+							) : null}
 						</div>
-						{referenceFileName ? (
-							<p className="text-xs text-muted-foreground">
-								已导入：{referenceFileName}
-							</p>
-						) : (
-							<p className="text-xs text-muted-foreground">
-								支持 TXT 和常见文本文件。导入后会用 AI 识别标题、题材和市场定位。
-							</p>
-						)}
 					</div>
-					<div className="grid gap-4 md:grid-cols-[1fr_160px]">
+					<ReferenceProfileProgressPanel
+						loading={loading === "profile"}
+						progress={referenceProfileProgress}
+					/>
+					<div className="mt-5 grid gap-4 md:grid-cols-2">
 						<div className="space-y-2">
-							<Label>参考章节标题</Label>
+							<Label htmlFor="market-category">细分分类（识别）</Label>
 							<Input
-								value={referenceTitle}
-								onChange={(event) => setReferenceTitle(event.target.value)}
+								id="market-category"
+								value={category}
+								onChange={(event) => setCategory(event.target.value)}
+								placeholder="都市神医 / 追妻火葬场 / 赘婿逆袭"
 							/>
 						</div>
 						<div className="space-y-2">
-							<Label>题材</Label>
-							<select
-								className="h-10 w-full rounded-md border border-input bg-background px-3 text-sm"
-								value={genre}
-								onChange={(event) => setGenre(event.target.value)}
-							>
-								<option value="xuanhuan">玄幻</option>
-								<option value="urban">都市</option>
-								<option value="romance">言情</option>
-								<option value="suspense">悬疑</option>
-								<option value="infinite-flow">无限流</option>
-								<option value="other">其他</option>
-							</select>
+							<Label htmlFor="market-theme">主题承诺（识别）</Label>
+							<Input
+								id="market-theme"
+								value={theme}
+								onChange={(event) => setTheme(event.target.value)}
+								placeholder="逆袭打脸 / 救赎 / 破镜重圆"
+							/>
+						</div>
+						<div className="space-y-2">
+							<Label htmlFor="market-tags">标签（识别）</Label>
+							<Input
+								id="market-tags"
+								value={tags}
+								onChange={(event) => setTags(event.target.value)}
+								placeholder="用逗号分隔"
+							/>
+						</div>
+						<div className="space-y-2">
+							<Label htmlFor="market-explicit-keywords">显性关键词（识别）</Label>
+							<Input
+								id="market-explicit-keywords"
+								value={explicitKeywords}
+								onChange={(event) => setExplicitKeywords(event.target.value)}
+								placeholder="标题/简介/正文可出现的词"
+							/>
+						</div>
+						<div className="space-y-2">
+							<Label htmlFor="market-implicit-expectations">隐性期待（识别）</Label>
+							<Input
+								id="market-implicit-expectations"
+								value={implicitExpectations}
+								onChange={(event) => setImplicitExpectations(event.target.value)}
+								placeholder="被低估 / 反转 / 后悔 / 关系破裂"
+							/>
+						</div>
+						<div className="space-y-2">
+							<Label htmlFor="positioning-promise">标题/简介承诺（识别）</Label>
+							<Input
+								id="positioning-promise"
+								value={positioningPromise}
+								onChange={(event) => setPositioningPromise(event.target.value)}
+								placeholder="用于检查正文是否兑现点击承诺"
+							/>
 						</div>
 					</div>
-					<textarea
-						className="min-h-48 w-full resize-y rounded-md border border-input bg-background p-3 text-sm leading-6"
-						value={referenceText}
-						onChange={(event) => onReferenceTextChange(event.target.value)}
-					/>
-				</div>
-			</section>
+				</section>
 
-			<section className="rounded-md border border-border bg-card p-5">
-				<div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
-					<div className="flex items-center gap-2">
+				<section className="rounded-md border border-border bg-card p-5">
+					<div className="flex items-center justify-between gap-3">
+						<div className="flex items-center gap-2">
+							<FileText className="size-5 text-primary" />
+							<h2 className="text-lg font-semibold">5. 质检我的章节</h2>
+						</div>
+						<div className="flex flex-wrap gap-2">
+							<Button
+								onClick={onScoreChapter}
+								disabled={loading !== null || !rubricResult}
+							>
+								{loading === "score" ? (
+									<Loader2 className="mr-2 size-4 animate-spin" />
+								) : null}
+								开始评分
+							</Button>
+							{hasScoreCache ? (
+								<Button
+									variant="outline"
+									onClick={onRescoreChapter}
+									disabled={loading !== null || !rubricResult}
+								>
+									重新分析
+								</Button>
+							) : null}
+						</div>
+					</div>
+
+					<div className="mt-5 grid gap-4">
+						<div className="space-y-2">
+							<Label htmlFor="chapter-title">我的章节标题</Label>
+							<Input
+								id="chapter-title"
+								value={chapterTitle}
+								onChange={(event) =>
+									onChapterDraftChange({ chapterTitle: event.target.value })
+								}
+							/>
+						</div>
+						<textarea
+							id="chapter-text"
+							aria-label="我的章节正文"
+							className="min-h-48 w-full resize-y rounded-md border border-input bg-background p-3 text-sm leading-6"
+							value={chapterText}
+							onChange={(event) =>
+								onChapterDraftChange({ chapterText: event.target.value })
+							}
+						/>
+					</div>
+				</section>
+
+				<details className="rounded-md border border-border bg-card p-5" open>
+					<summary className="flex cursor-pointer list-none items-center gap-2">
+						<ScanText className="size-5 text-primary" />
+						<h2 className="text-lg font-semibold">
+							AI 自测增强
+							<FieldHelp text="这里不是让你填测试结果，而是让 AI 自动检查人名辨识、跳读感、删句影响等问题，并把结论写进评分和改文 Prompt。" />
+						</h2>
+						<span className="ml-auto text-xs text-muted-foreground">可选</span>
+					</summary>
+					<div className="mt-4 flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
+						<div>
+							<p className="text-sm font-medium">让 AI 额外跑普通人自测</p>
+							<p className="mt-1 text-sm leading-6 text-muted-foreground">
+								开启后，你只上传章节；AI
+								会把自测结论用于定位问题，并生成更精准的改文 Prompt。
+							</p>
+						</div>
+						<label className="inline-flex w-fit items-center gap-2 rounded-md border border-border bg-background px-3 py-2 text-sm">
+							<input
+								type="checkbox"
+								className="size-4 accent-primary"
+								checked={aiSelfTestEnabled}
+								onChange={(event) => setAiSelfTestEnabled(event.target.checked)}
+							/>
+							启用
+						</label>
+					</div>
+					<div className="mt-5 grid gap-3 md:grid-cols-2">
+						{aiSelfTests.map((test) => {
+							const checked = enabledAiSelfTests.includes(test.id);
+							return (
+								<label
+									key={test.id}
+									className={`rounded-md border p-4 text-sm transition ${
+										aiSelfTestEnabled && checked
+											? "border-primary/40 bg-primary/5"
+											: "border-border bg-background"
+									}`}
+								>
+									<span className="flex items-center gap-2 font-medium">
+										<input
+											type="checkbox"
+											className="size-4 accent-primary"
+											checked={checked}
+											disabled={!aiSelfTestEnabled}
+											onChange={() => toggleAiSelfTest(test.id)}
+										/>
+										{test.name}
+									</span>
+									<span className="mt-2 block leading-6 text-muted-foreground">
+										{test.description}
+									</span>
+								</label>
+							);
+						})}
+					</div>
+				</details>
+
+				<details className="rounded-md border border-border bg-card p-5">
+					<summary className="flex cursor-pointer list-none items-center gap-2">
 						<Sparkles className="size-5 text-primary" />
 						<h2 className="text-lg font-semibold">
-							4. AI 识别的市场定位
-							<FieldHelp text="分类、主题、标签和关键词优先由 AI 从参考章节识别；如果当前模型不可用，系统不会用粗糙本地规则覆盖字段，请切换模型重试或手动填写。" />
+							6. 数据表现快照
+							<FieldHelp text="数据只做辅助归因，不能直接等同于文本好坏。这里会按平台和阅读场景切换指标权重：长篇看追更链路，短篇看完读和付费链路。" />
 						</h2>
+						<span className="ml-auto text-xs text-muted-foreground">可选高级项</span>
+					</summary>
+					<p className="mt-3 rounded-md border border-border bg-background px-3 py-2 text-sm leading-6 text-muted-foreground">
+						{performanceSnapshotNote}
+					</p>
+					<p className="mt-5 text-sm font-medium">核心指标</p>
+					<div className="mt-5 grid gap-4 md:grid-cols-3">
+						{corePerformanceMetrics.map((metric) => (
+							<div key={metric.id} className="space-y-2">
+								<Label>{metric.label}</Label>
+								<Input
+									inputMode={metric.inputMode}
+									value={metric.value}
+									onChange={(event) => metric.onChange(event.target.value)}
+								/>
+							</div>
+						))}
 					</div>
-					<div className="flex flex-wrap gap-2">
-						<Button
-							type="button"
-							variant="outline"
-							onClick={() =>
-								onInferReferenceProfile(
-									referenceText,
-									referenceFileName || undefined,
-								)
-							}
-							disabled={!referenceText.trim() || loading !== null}
-						>
-							{loading === "profile" ? (
-								<Loader2 className="mr-2 size-4 animate-spin" />
-							) : (
-								<Sparkles className="mr-2 size-4" />
-							)}
-							AI 重新识别
-						</Button>
-						<Button onClick={onBuildRubric} disabled={loading !== null}>
-							{loading === "rubric" ? (
-								<Loader2 className="mr-2 size-4 animate-spin" />
-							) : null}
-							生成评分标准
-						</Button>
-					</div>
-				</div>
-				<ReferenceProfileProgressPanel
-					loading={loading === "profile"}
-					progress={referenceProfileProgress}
-				/>
-				<div className="mt-5 grid gap-4 md:grid-cols-2">
-					<div className="space-y-2">
-						<Label>细分分类（识别）</Label>
-						<Input
-							value={category}
-							onChange={(event) => setCategory(event.target.value)}
-							placeholder="都市神医 / 追妻火葬场 / 赘婿逆袭"
-						/>
-					</div>
-					<div className="space-y-2">
-						<Label>主题承诺（识别）</Label>
-						<Input
-							value={theme}
-							onChange={(event) => setTheme(event.target.value)}
-							placeholder="逆袭打脸 / 救赎 / 破镜重圆"
-						/>
-					</div>
-					<div className="space-y-2">
-						<Label>标签（识别）</Label>
-						<Input
-							value={tags}
-							onChange={(event) => setTags(event.target.value)}
-							placeholder="用逗号分隔"
-						/>
-					</div>
-					<div className="space-y-2">
-						<Label>显性关键词（识别）</Label>
-						<Input
-							value={explicitKeywords}
-							onChange={(event) => setExplicitKeywords(event.target.value)}
-							placeholder="标题/简介/正文可出现的词"
-						/>
-					</div>
-					<div className="space-y-2">
-						<Label>隐性期待（识别）</Label>
-						<Input
-							value={implicitExpectations}
-							onChange={(event) => setImplicitExpectations(event.target.value)}
-							placeholder="被低估 / 反转 / 后悔 / 关系破裂"
-						/>
-					</div>
-					<div className="space-y-2">
-						<Label>标题/简介承诺（识别）</Label>
-						<Input
-							value={positioningPromise}
-							onChange={(event) => setPositioningPromise(event.target.value)}
-							placeholder="用于检查正文是否兑现点击承诺"
-						/>
-					</div>
-				</div>
-			</section>
-
-			<section className="rounded-md border border-border bg-card p-5">
-				<div className="flex items-center justify-between gap-3">
-					<div className="flex items-center gap-2">
-						<FileText className="size-5 text-primary" />
-						<h2 className="text-lg font-semibold">5. 质检我的章节</h2>
-					</div>
-					<Button onClick={onScoreChapter} disabled={loading !== null || !rubricResult}>
-						{loading === "score" ? (
-							<Loader2 className="mr-2 size-4 animate-spin" />
-						) : null}
-						开始评分
-					</Button>
-				</div>
-
-				<div className="mt-5 grid gap-4">
-					<div className="space-y-2">
-						<Label>我的章节标题</Label>
-						<Input
-							value={chapterTitle}
-							onChange={(event) =>
-								onChapterDraftChange({ chapterTitle: event.target.value })
-							}
-						/>
-					</div>
-					<textarea
-						className="min-h-48 w-full resize-y rounded-md border border-input bg-background p-3 text-sm leading-6"
-						value={chapterText}
-						onChange={(event) =>
-							onChapterDraftChange({ chapterText: event.target.value })
-						}
-					/>
-				</div>
-			</section>
-
-			<details className="rounded-md border border-border bg-card p-5" open>
-				<summary className="flex cursor-pointer list-none items-center gap-2">
-					<ScanText className="size-5 text-primary" />
-					<h2 className="text-lg font-semibold">
-						AI 自测增强
-						<FieldHelp text="这里不是让你填测试结果，而是让 AI 自动检查人名辨识、跳读感、删句影响等问题，并把结论写进评分和改文 Prompt。" />
-					</h2>
-					<span className="ml-auto text-xs text-muted-foreground">可选</span>
-				</summary>
-				<div className="mt-4 flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
-					<div>
-						<p className="text-sm font-medium">让 AI 额外跑普通人自测</p>
-						<p className="mt-1 text-sm leading-6 text-muted-foreground">
-							开启后，你只上传章节；AI 会把自测结论用于定位问题，并生成更精准的改文
-							Prompt。
-						</p>
-					</div>
-					<label className="inline-flex w-fit items-center gap-2 rounded-md border border-border bg-background px-3 py-2 text-sm">
-						<input
-							type="checkbox"
-							className="size-4 accent-primary"
-							checked={aiSelfTestEnabled}
-							onChange={(event) => setAiSelfTestEnabled(event.target.checked)}
-						/>
-						启用
-					</label>
-				</div>
-				<div className="mt-5 grid gap-3 md:grid-cols-2">
-					{aiSelfTests.map((test) => {
-						const checked = enabledAiSelfTests.includes(test.id);
-						return (
-							<label
-								key={test.id}
-								className={`rounded-md border p-4 text-sm transition ${
-									aiSelfTestEnabled && checked
-										? "border-primary/40 bg-primary/5"
-										: "border-border bg-background"
-								}`}
-							>
-								<span className="flex items-center gap-2 font-medium">
-									<input
-										type="checkbox"
-										className="size-4 accent-primary"
-										checked={checked}
-										disabled={!aiSelfTestEnabled}
-										onChange={() => toggleAiSelfTest(test.id)}
-									/>
-									{test.name}
-								</span>
-								<span className="mt-2 block leading-6 text-muted-foreground">
-									{test.description}
-								</span>
-							</label>
-						);
-					})}
-				</div>
-			</details>
-
-			<details className="rounded-md border border-border bg-card p-5">
-				<summary className="flex cursor-pointer list-none items-center gap-2">
-					<Sparkles className="size-5 text-primary" />
-					<h2 className="text-lg font-semibold">
-						6. 数据表现快照
-						<FieldHelp text="数据只做辅助归因，不能直接等同于文本好坏。这里会按平台和阅读场景切换指标权重：长篇看追更链路，短篇看完读和付费链路。" />
-					</h2>
-					<span className="ml-auto text-xs text-muted-foreground">可选高级项</span>
-				</summary>
-				<p className="mt-3 rounded-md border border-border bg-background px-3 py-2 text-sm leading-6 text-muted-foreground">
-					{performanceSnapshotNote}
-				</p>
-				<p className="mt-5 text-sm font-medium">核心指标</p>
-				<div className="mt-5 grid gap-4 md:grid-cols-3">
-					{corePerformanceMetrics.map((metric) => (
-						<div key={metric.id} className="space-y-2">
-							<Label>{metric.label}</Label>
-							<Input
-								inputMode={metric.inputMode}
-								value={metric.value}
-								onChange={(event) => metric.onChange(event.target.value)}
-							/>
+					{auxiliaryPerformanceMetrics.length ? (
+						<div className="mt-5 rounded-md border border-border bg-background p-4">
+							<p className="text-sm font-medium">可选辅助指标</p>
+							<div className="mt-4 grid gap-4 md:grid-cols-3">
+								{auxiliaryPerformanceMetrics.map((metric) => (
+									<div key={metric.id} className="space-y-2">
+										<Label>{metric.label}</Label>
+										<Input
+											inputMode={metric.inputMode}
+											value={metric.value}
+											onChange={(event) =>
+												metric.onChange(event.target.value)
+											}
+										/>
+									</div>
+								))}
+							</div>
 						</div>
-					))}
-				</div>
-				{auxiliaryPerformanceMetrics.length ? (
-					<div className="mt-5 rounded-md border border-border bg-background p-4">
-						<p className="text-sm font-medium">可选辅助指标</p>
-						<div className="mt-4 grid gap-4 md:grid-cols-3">
-							{auxiliaryPerformanceMetrics.map((metric) => (
-								<div key={metric.id} className="space-y-2">
-									<Label>{metric.label}</Label>
-									<Input
-										inputMode={metric.inputMode}
-										value={metric.value}
-										onChange={(event) => metric.onChange(event.target.value)}
-									/>
-								</div>
-							))}
-						</div>
-					</div>
-				) : null}
+					) : null}
+				</details>
+
+				<ScoreProgressPanel loading={loading === "score"} progress={scoreProgress} />
+
+				<section className="grid gap-6 xl:grid-cols-2">
+					<RubricPanel rubricResult={rubricResult} />
+					<ScorePanel scoreResult={scoreResult} isShortFormReading={isShortFormReading} />
+				</section>
 			</details>
-
-			<ScoreProgressPanel loading={loading === "score"} progress={scoreProgress} />
-
-			<section className="grid gap-6 xl:grid-cols-2">
-				<RubricPanel rubricResult={rubricResult} />
-				<ScorePanel scoreResult={scoreResult} isShortFormReading={isShortFormReading} />
-			</section>
 		</>
 	);
 }
@@ -1019,7 +1100,7 @@ function getScoreProgressMeta(status: ScoreProgressStatus) {
 		return {
 			label: "已完成",
 			icon: CheckCircle2,
-			className: "border-emerald-500/30 bg-emerald-500/10 text-emerald-400",
+			className: "border-success-border bg-success-surface text-success-foreground",
 			iconClassName: "",
 		};
 	}

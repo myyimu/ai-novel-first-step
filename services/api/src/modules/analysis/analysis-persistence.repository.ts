@@ -105,14 +105,17 @@ export class AnalysisPersistenceRepository {
     return this.jobSnapshot(row);
   }
 
-  async getJob(jobId: string): Promise<BookAnalysisJobSnapshot | undefined> {
+  async getJob(
+    jobId: string,
+    options?: { includeResult?: boolean },
+  ): Promise<BookAnalysisJobSnapshot | undefined> {
     const [row] = await this.drizzle.db
       .select()
       .from(bookAnalysisJobs)
       .where(eq(bookAnalysisJobs.id, jobId))
       .limit(1);
 
-    return row ? this.jobSnapshot(row) : undefined;
+    return row ? this.jobSnapshot(row, options) : undefined;
   }
 
   async listJobs(limit = 20): Promise<BookAnalysisJobSnapshot[]> {
@@ -123,6 +126,15 @@ export class AnalysisPersistenceRepository {
       .limit(Math.min(Math.max(limit, 1), 100));
 
     return rows.map((row) => this.jobSnapshot(row));
+  }
+
+  async deleteJob(jobId: string): Promise<boolean> {
+    const rows = await this.drizzle.db
+      .delete(bookAnalysisJobs)
+      .where(eq(bookAnalysisJobs.id, jobId))
+      .returning({ id: bookAnalysisJobs.id });
+
+    return rows.length > 0;
   }
 
   async updateJob(
@@ -203,7 +215,14 @@ export class AnalysisPersistenceRepository {
     };
   }
 
-  private jobSnapshot(row: BookAnalysisJobSelect): BookAnalysisJobSnapshot {
+  private jobSnapshot(
+    row: BookAnalysisJobSelect,
+    options?: { includeResult?: boolean },
+  ): BookAnalysisJobSnapshot {
+    const partialResult = row.partialResult as
+      | (BookAnalysisJobSnapshot["partialResult"] & { chapterMaps?: unknown[] })
+      | undefined;
+
     return {
       id: row.id,
       type: "book-map-reduce-analysis",
@@ -216,9 +235,23 @@ export class AnalysisPersistenceRepository {
       progress: row.progress as BookAnalysisJobProgress,
       preprocessing:
         row.preprocessing as BookAnalysisJobSnapshot["preprocessing"],
-      partialResult:
-        row.partialResult as BookAnalysisJobSnapshot["partialResult"],
-      result: row.result,
+      partialResult: partialResult
+        ? {
+            partial: partialResult.partial,
+            type: partialResult.type,
+            stage: partialResult.stage,
+            savedAt: partialResult.savedAt,
+            mapCount: partialResult.mapCount,
+            totalChapters: partialResult.totalChapters,
+            artifactDir: partialResult.artifactDir,
+            notice: partialResult.notice,
+            analysisStrategy: partialResult.analysisStrategy,
+            outlineCount: partialResult.outlineCount,
+            deepTargetOrders: partialResult.deepTargetOrders,
+            deepCompletedCount: partialResult.deepCompletedCount,
+          }
+        : undefined,
+      result: options?.includeResult === false ? undefined : row.result,
       error: row.error ?? undefined,
       uploadId: row.uploadId ?? undefined,
     };

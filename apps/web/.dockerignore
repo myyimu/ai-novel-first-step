@@ -1,0 +1,4 @@
+*
+!Dockerfile
+!.one-container/
+!.one-container/**

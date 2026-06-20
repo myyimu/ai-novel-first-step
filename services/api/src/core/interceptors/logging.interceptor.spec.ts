@@ -108,6 +108,30 @@ describe("LoggingInterceptor", () => {
     expect(logCall).not.toContain("jwt-token");
   });
 
+  it("should sanitize nested api keys and redact long text content", async () => {
+    const context = createMockContext(
+      "POST",
+      "/api/v1/analysis/quick-review",
+      {},
+      {
+        provider: {
+          preset: "deepseek",
+          apiKey: "sk-user-owned",
+        },
+        chapterText: "这是一段用户正文".repeat(50),
+      },
+    );
+    const handler = createMockCallHandler("ok");
+
+    await lastValueFrom(interceptor.intercept(context, handler));
+
+    const logCall = (logger.info as jest.Mock).mock.calls[0][0];
+    expect(logCall).toContain('"apiKey":"***"');
+    expect(logCall).toContain('"chapterText":"[redacted text length=');
+    expect(logCall).not.toContain("sk-user-owned");
+    expect(logCall).not.toContain("这是一段用户正文");
+  });
+
   it("should sanitize sensitive fields in query", async () => {
     const context = createMockContext("GET", "/api/v1/test", {
       secret: "my-key",

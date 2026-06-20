@@ -1,120 +1,71 @@
 # AI小说第一步 技术架构
 
-定位：本地部署的 AI 小说拆解与质检工具，用热门章节拆解出的优点生成评分标准，再用评分标准质检用户自己的章节。
+## 产品定位
+
+AI小说第一步是本地部署的 AI 小说章节急诊与样本拆解工具。
+
+当前产品主路径不是“先填完整配置再分析”，而是：
+
+```text
+粘贴自己的章节
+-> 运行章节急诊
+-> 找出最大追读问题
+-> 复制改稿 Prompt
+-> 改完后复测
+```
+
+成熟样本拆解、Rubric、高级评分、整书资产和研究库是进阶能力，用来支撑更严肃的学习、质检和创作决策。
 
 ## Workspace
 
-- `apps/web`: Next.js 控制台，负责拆书样本、章节评分、模型配置和报告展示。
-- `services/api`: NestJS API，负责项目、文本、模型配置、任务与报告接口。
-- `packages/ai-core`: 共享类型、评分指标、Provider 抽象和分析流水线契约。
-- `docker-compose.yml`: 本地部署入口，启动 PostgreSQL、API、Web；Redis 和 MinIO 只作为后续扩展方向，不在默认 compose 中启动。
+- `apps/web`: Next.js 控制台，负责章节急诊、高级质检、整书资产、研究库、AI 设置和导出入口。
+- `services/api`: NestJS API，负责模型调用、章节急诊、参考画像、Rubric、评分、整书异步任务、研究库和导出。
+- `packages/ai-core`: Web 和 API 共享的分析类型、评分结果结构和模型契约。
+- `docker-compose.yml`: 本地部署入口，启动 PostgreSQL、API、Web；Redis 和 MinIO 是后续扩展方向，不在默认 compose 中启动。
+- `one.manifest.json`: One CLI workspace 的项目、容器和运行入口定义。
 
 ## Frontend Information Architecture
 
-控制台不再把所有功能堆在一个长页面里，而是按作者真实工作顺序拆成 6 个视图：
+控制台按用户成熟度分层：
 
-- 工作台：解释当前产品能做什么，并提供“质检一章”和“拆解整书”两个主入口。
-- 模型配置：选择供应商预设、填写 BYOK Key、测试模型连通性。
-- 单章点评：配置平台、读者、分类、关键词、数据快照，生成 Rubric 并质检章节。
-- 整书拆解：上传 TXT、预览章节切分、启动 Map-Reduce 整书任务。
-- 历史任务：查看本地上传记录和拆解任务，重新打开已完成结果。
-- 导出中心：先选择“原作拆解笔记”或“原创化导出”，展示上下文风险提示，再把整书拆解结果导出为 Markdown、JSON、角色卡、世界书、SillyTavern World Info、续写包、风格圣经、卷纲、提示词包或 Do Not Copy 清单。
+- 第一章质检台：默认入口，承接“粘贴章节 -> 章节急诊 -> 改稿 Prompt -> 复测”。
+- 高级章节质检：导入成熟样本，AI 识别市场定位，生成 Rubric，再评分自己的章节。
+- 整书资产：上传 TXT，预览章节切分，启动 Map-Reduce 整书拆解，沉淀角色卡、世界书和写作资产。
+- 研究决策：把已拆解样本、评分证据和多书对比压缩成可追溯的选题/改稿判断。
+- AI 设置：共享模型、本地 mock、自备 OpenAI-compatible 供应商配置和连通性测试。
+- 历史任务/导出中心：围绕已完成的整书任务做恢复、查看和素材导出。
 
-关键配置项旁边使用 `?` 解释“为什么要填这个”和“它会影响什么”，避免新手只看到字段但不知道字段和网文表现之间的关系。复杂流程使用步骤条提示当前视图的推荐顺序。
+复杂参数遵循渐进暴露原则：首屏只要求章节正文；平台画像、样本 Rubric、数据快照和研究库能力后置。
 
-## MVP 流程
+## Core Product Flow
+
+### 1. Chapter Triage
 
 ```text
-上传成熟章节
--> 选择题材、目标平台、目标读者、阅读场景
--> 生成 Style Profile
--> 填写分类、主题、标签、显性关键词、隐性期待
--> 生成 Market Profile
--> 可选填写展现量、点击率、阅读30s、阅读60s、触底率、追更率
--> 生成 Performance Snapshot
--> 清洗和章节切分
--> 拆解目标/冲突/情绪债/钩子
--> 抽象可迁移原则
--> 生成题材评分表
--> 上传我的章节
--> 按评分表打分
--> Critic Pass 校验
--> 输出证据、短板、改法
+用户粘贴章节
+-> POST /analysis/quick-review
+-> 返回定位、卖点、最大问题、改法、推荐平台、quickScore
+-> 前端生成可复制的改稿 Prompt
+-> 用户改稿后再次运行，比较前后 quickScore 和问题变化
 ```
 
-Style Profile 当前覆盖：
+章节急诊用于降低首次使用门槛，不要求成熟样本、Rubric 或完整平台参数。
 
-- 目标平台：起点、番茄、晋江、七猫、微信短篇/小程序文、其他。
-- 目标读者：男频快节奏爽文、女频情绪流、设定党、快节奏小白文、悬疑脑洞、其他。
-- 阅读场景：长篇追更、移动端碎片阅读、短篇付费、其他。
+### 2. Advanced Chapter Critique
 
-Rubric 会额外加入 `平台节奏匹配度` 和 `目标读者匹配度`，评分报告会输出 `styleFit`，用于识别“故事结构可用但不适合目标平台”的问题。
+```text
+导入成熟章节
+-> POST /analysis/reference/profile
+-> AI 识别分类、主题、标签、显性关键词、隐性期待、标题/简介承诺
+-> POST /analysis/rubric
+-> 生成成熟样本可迁移原则和评分 Rubric
+-> POST /analysis/score
+-> 用同一标准评分用户章节，输出证据、短板、改法和 revisionPrompt
+```
 
-Market Profile 当前覆盖：
+高级质检用于更精确地判断“这章是否兑现目标平台和目标读者期待”。
 
-- 细分分类：例如都市神医、赘婿逆袭、追妻火葬场、真假千金。
-- 主题承诺：例如逆袭打脸、救赎、破镜重圆、悬疑解谜。
-- 标签：读者识别作品的 trope 或卖点标签。
-- 显性关键词：标题、简介、正文中可以自然出现的词。
-- 隐性期待：关键词背后的结构期待，例如“追妻火葬场 = 亏欠 + 离开 + 后悔 + 追逐”。
-- 标题/简介承诺：用于检查正文是否兑现点击承诺。
-
-Rubric 会额外加入 `分类期待匹配度`、`主题承诺清晰度`、`关键词与标签命中度`、`卖点前置程度`。评分报告会输出 `marketFit`，用于识别“章节可读但没有命中目标读者点击期待”的问题。
-
-Performance Snapshot 当前覆盖：
-
-- 展现量：辅助判断分发入口、分类标签、平台推荐是否匹配。
-- 点击率：辅助判断标题、简介、封面、关键词承诺和正文卖点是否一致。
-- 阅读30s：辅助判断开头理解成本、初始钩子、卖点前置。
-- 阅读60s：辅助判断冲突升级、情绪维持、信息增量。
-- 触底率：辅助判断章节中后段节奏、空转、重复信息。
-- 追更率：辅助判断结尾钩子、长期目标、系列承诺。
-
-评分报告会输出 `performanceFit`。这些数据只做归因辅助，不能把低数据直接等同于文本差；模型必须结合章节证据判断可能原因。
-
-## Revision Prompt
-
-评分报告会输出 `revisionPrompt`，用于把点评结果转换成可复制给写作 AI 的改文提示词。它必须包含：
-
-- 修改目标：优先解决哪些追读、点击、留存问题。
-- 平台风格：目标平台、读者、阅读场景。
-- 市场定位：分类、主题、标签、关键词、隐性期待。
-- 数据表现：展现、点击、30s、60s、触底、追更漏斗。
-- 改写边界：保留人物、场景和剧情事实，不另起炉灶。
-- 禁止事项：不堆设定、不机械堆关键词、不只润色文笔。
-- 输出格式：要求写作 AI 返回改写策略、改动段落、改写正文和改动理由。
-
-## Book Asset Analysis
-
-整书拆解接口：
-
-- `POST /api/v1/analysis/book/uploads`: 上传 TXT，保存原始文本和清洗文本，返回章节切分预览。
-- `GET /api/v1/analysis/book/uploads/:uploadId`: 读取上传记录和章节预览。
-- `POST /api/v1/analysis/book/uploads/:uploadId/jobs`: 基于已上传 TXT 创建整书 Map-Reduce 异步任务。
-- `GET /api/v1/analysis/book/jobs/:jobId`: 查询任务状态、进度、结果或失败原因。
-- `GET /api/v1/analysis/book/uploads`: 查看最近 TXT 上传记录。
-- `GET /api/v1/analysis/book/jobs`: 查看最近整书拆解任务。
-- `GET /api/v1/analysis/book/jobs/:jobId/export?format=markdown|json|tavern-card|world-book|sillytavern-world-info|continuation-pack|style-bible|outline|prompt-pack|do-not-copy&mode=notes|originalized`: 导出整书拆解结果；`notes` 保留原作拆解笔记，`originalized` 输出抽象、原创化、去标识化素材。
-- `POST /api/v1/analysis/book`: 兼容旧同步调用，内部也走 Map-Reduce 核心。
-
-MVP 支持上传 TXT 后先预览章节切分，再启动整书拆解任务，输出：
-
-- 世界观：世界规则、能力体系、地点、势力、专有名词风险。
-- 人物：角色原型、性格底色、欲望、创伤、能力功能、原创化角色卡。
-- 关系图谱：nodes / edges，先用结构化 JSON 表示，后续可渲染成图。
-- 故事线：主线、成长线、感情线、副本线、阴谋线。
-- 大事纪：事件顺序、影响、叙事功能。
-- 世界历史书：远古史、近代事件、公开传说、隐藏真相。
-- 写作支持包：章节功能表、伏笔与回收表、爽点/情绪点地图、节奏曲线、读者承诺清单、冲突矩阵、续写约束包、质量诊断。
-- 世界书与生成资产：可导入 AI 写作软件的世界书条目、触发规则、风格圣经、卷/阶段规划、场景模板、角色语气、反派压力、标题简介关键词包、一致性检查清单。
-- 导出包：酒馆/AI 写作软件角色卡草稿、世界书条目、SillyTavern World Info、续写包、风格圣经、卷纲、提示词包、写作约束、Do Not Copy 清单。
-- 原创化报告：可学习原则、必须转换元素、同人/换皮风险提示、原创化迁移策略。
-- 原作拆解笔记：保留原作人物、世界观、时间线、关系网、专有名词的结构化笔记，用于学习、研究、合法授权或个人私用场景。
-- 使用风险提示：推荐用途、较高风险用途、用户责任说明。
-
-整书任务会持久化中间结果：每完成一个章节 map，系统会把该章拆解 JSON 写入 `.local/analysis/jobs/{jobId}/maps/`，并在 job 记录里更新 `partialResult`。如果模型 token 额度不足、网络失败或 reduce 失败，上传记录、章节切分预览、已完成章节 map 和失败状态仍会保留。MVP 先展示半成品保存进度；后续可扩展为断点续跑、补跑失败章节和半成品导出。
-
-产品原则：工具不预设用户意图，允许同时保留“原作拆解笔记”和“原创化导出包”。原作拆解笔记用于读书笔记、学习分析、合法授权素材整理或个人私用角色扮演；原创化导出包用于低风险迁移。界面必须明确风险提示，默认不鼓励未授权商业化复制原作姓名、专有名词、人物关系网、关键事件链或世界历史具体事件。
+### 3. Full Book Asset Analysis
 
 ```text
 TXT 上传
@@ -129,23 +80,71 @@ TXT 上传
 -> 图谱/时间线/世界书展示和导出
 ```
 
-## Model Provider
+整书任务会持久化中间结果：每完成一个章节 map，系统会把该章拆解 JSON 写入 `.local/analysis/jobs/{jobId}/maps/`，并在 job 记录里更新 `partialResult`。如果模型 token 额度不足、网络失败或 reduce 失败，上传记录、章节切分预览、已完成章节 map 和失败状态仍会保留。
 
-默认采用 BYOK：
+### 4. Research Library
 
-- `mock`: 本地开发和自动化测试。
-- `openai-compatible`: 兼容 OpenAI 风格接口的远程或本地模型。
-- 供应商预设：`deepseek`、`doubao`、`qwen`、`ollama`、`custom`。
-- 阿里云百炼/通义千问使用 `https://dashscope.aliyuncs.com/compatible-mode/v1`，供应商预设和模型 ID 独立；用户可以从常用模型中选择，也可以手动填写百炼支持的其他模型名。
-- `doubao` / `deepseek` / `qwen` / `ollama` 本质仍走统一 `ModelProviderService`，对业务层暴露 `chat()` 和 `test()`。
+```text
+已完成整书任务
+-> 提取图谱资产、引用证据和样本摘要
+-> 多书横向对比
+-> 针对研究问题做证据型问答
+-> 生成选题/改稿 Prompt seed
+```
 
-用户 Key 随请求进入本地 API，不持久化；日志不得打印 Key、正文全文和模型原始响应。后续如果做本地模型配置保存，需要先实现本地加密存储和显式授权。
+研究库不追求通用聊天，而是把已拆解资料变成可追溯的创作判断。
+
+## Analysis Dimensions
+
+### Style Profile
+
+- 目标平台：起点、番茄、晋江、七猫、微信短篇/小程序文、其他。
+- 目标读者：男频快节奏爽文、女频情绪流、设定党、快节奏小白文、悬疑脑洞、其他。
+- 阅读场景：长篇追更、移动端碎片阅读、短篇付费、其他。
+
+评分报告会输出 `styleFit`，用于识别“故事结构可用但不适合目标平台”的问题。
+
+### Market Profile
+
+- 细分分类：例如都市神医、赘婿逆袭、追妻火葬场、真假千金。
+- 主题承诺：例如逆袭打脸、救赎、破镜重圆、悬疑解谜。
+- 标签：读者识别作品的 trope 或卖点标签。
+- 显性关键词：标题、简介、正文中可以自然出现的词。
+- 隐性期待：关键词背后的结构期待，例如“追妻火葬场 = 亏欠 + 离开 + 后悔 + 追逐”。
+- 标题/简介承诺：用于检查正文是否兑现点击承诺。
+
+评分报告会输出 `marketFit`，用于识别“章节可读但没有命中目标读者点击期待”的问题。
+
+### Performance Snapshot
+
+- 展现量：辅助判断分发入口、分类标签、平台推荐是否匹配。
+- 点击率：辅助判断标题、简介、封面、关键词承诺和正文卖点是否一致。
+- 阅读30s/60s：辅助判断开头理解成本、初始钩子、冲突升级和情绪维持。
+- 触底率：辅助判断章节中后段节奏、空转和重复信息。
+- 追更、加书架、下一章点击、前3章留存：辅助判断长篇追更承诺。
+- 平均阅读进度、付费解锁：辅助判断短篇付费场景。
+
+评分报告会输出 `performanceFit`。这些数据只做归因辅助，不能把低数据直接等同于文本差；模型必须结合章节证据判断可能原因。
+
+## Revision Prompt
+
+章节急诊和高级评分都会围绕改稿 Prompt 服务。Prompt 应包含：
+
+- 修改目标：优先解决哪些追读、点击、留存问题。
+- 平台风格：目标平台、读者、阅读场景。
+- 市场定位：分类、主题、标签、关键词、隐性期待。
+- 改写边界：保留人物、场景和剧情事实，不另起炉灶。
+- 禁止事项：不堆设定、不机械堆关键词、不只润色文笔。
+- 输出格式：要求写作 AI 返回改写策略、改动段落、改写正文和改动理由。
 
 ## API Skeleton
 
 - `GET /api/v1/analysis/pipeline`: 返回计划中的分析流水线。
 - `POST /api/v1/analysis/preview`: 不调用真实模型，返回结构化评分预览。
+- `POST /api/v1/analysis/quick-review`: 章节急诊。
 - `POST /api/v1/analysis/provider/test`: 测试 mock 或 OpenAI-compatible Provider。
+- `GET /api/v1/analysis/provider/presets`: 返回模型供应商预设。
+- `POST /api/v1/analysis/reference/profile`: 从成熟章节识别市场定位。
 - `POST /api/v1/analysis/rubric`: 从成熟章节生成原则和 Rubric。
 - `POST /api/v1/analysis/score`: 用 Rubric 质检用户章节。
 - `POST /api/v1/analysis/book/preprocess`: 直接对文本做清洗和章节切分预览。
@@ -153,28 +152,40 @@ TXT 上传
 - `GET /api/v1/analysis/book/uploads/:uploadId`: 读取上传预览。
 - `GET /api/v1/analysis/book/uploads`: 读取上传历史。
 - `POST /api/v1/analysis/book/uploads/:uploadId/jobs`: 从上传文本创建整书异步任务。
+- `POST /api/v1/analysis/book/jobs/:jobId/resume`: 从已完成章节继续整书任务。
 - `GET /api/v1/analysis/book/jobs/:jobId`: 查询整书异步任务状态。
+- `GET /api/v1/analysis/book/jobs/:jobId/search`: 搜索整书拆解证据锚点。
 - `GET /api/v1/analysis/book/jobs`: 读取任务历史。
 - `GET /api/v1/analysis/book/jobs/:jobId/export`: 导出 Markdown、JSON、Tavern 角色卡、World Book、SillyTavern World Info、续写包、风格圣经、卷纲、提示词包、Do Not Copy 清单，支持 `mode=notes|originalized`。
-
-Provider Key 随本次请求进入本地 API，不持久化。任务状态、清洗预览和结果会持久化；如果服务重启时任务仍处于 `queued` 或 `running`，系统会把任务标记为 `failed` 并要求用户重新提交，因为恢复远程模型任务需要用户重新提供 Key。
-
-后续可把当前本地任务执行器替换为 Redis/BullMQ Worker：
-
-```text
-analysis_jobs
--> 本地任务执行器
--> analysis_worker
--> llm_provider
--> reports
-```
+- `GET /api/v1/analysis/research/library`: 读取持久化研究库资产。
+- `POST /api/v1/analysis/research/compare`: 多书横向对比。
+- `POST /api/v1/analysis/research/ask`: 基于研究库证据回答问题。
 
 ## Storage Plan
 
-- PGlite/PostgreSQL: 用户项目、上传记录、章节预览、任务状态、评分表、报告。
-- pgvector: 原则库、同题材案例检索。
+- PGlite/PostgreSQL: 上传记录、章节预览、任务状态、评分表、报告和研究库资产。
+- Local FS: 原始上传文件、清洗后文本、章节 map 中间结果和导出报告。MVP 默认使用 `.local/analysis` 与 `.local/artifacts`。
 - Redis: 后续承接分布式异步任务队列和短期任务状态，当前未接入运行时代码。
-- Local FS: 原始上传文件、清洗后文本和导出报告。MVP 默认使用 `.local/analysis`，MinIO 作为后续对象存储扩展方向。
+- MinIO/object storage: 后续替换本地文件系统，当前未接入运行时代码。
+
+## Model Provider
+
+- `mock`: 本地开发和自动化测试。
+- `shared-gpu`: 服务端配置的共享 OpenAI-compatible 线路，用于降低首次使用门槛。
+- `openai-compatible`: 兼容 OpenAI 风格接口的远程或本地模型。
+- 供应商预设：`deepseek`、`doubao`、`qwen`、`ollama`、`custom`。
+
+结构化输出按能力分层：
+
+- 官方 OpenAI / Azure OpenAI URL：优先使用 `response_format=json_schema`。
+- 明确支持 JSON Schema 的兼容供应商：可通过 `ENABLE_OPENAI_COMPAT_JSON_SCHEMA=true` 开启。
+- 只支持 JSON mode 或普通聊天补全的供应商：使用 `json_object`/Prompt 约束，并保留后端 JSON 修复和 Rubric 兜底。
+
+用户 Key 随请求进入本地 API，不持久化；日志不得打印 Key、正文全文和模型原始响应。
+
+## Product Safety Principle
+
+工具只提供拆解、学习、质检和导出能力，不预设用户意图。界面必须明确风险提示，默认不鼓励未授权商业化复制原作姓名、专有名词、人物关系网、关键事件链或世界历史具体事件。
 
 ## Naming
 
@@ -182,4 +193,4 @@ analysis_jobs
 
 产品英文名：`AI Novel First Step`
 
-理由：直接覆盖“新手怎么用 AI 写小说”“AI 写网文第一步”“新手用 AI 写小说遇到的困难”等搜索意图，同时保留产品解释空间。英文名用于界面品牌并列展示，方便后续 README、GitHub、Docker 镜像和国际化描述统一。
+命名理由：覆盖“新手怎么用 AI 写小说”“AI 写网文第一步”“新手用 AI 写小说遇到的困难”等搜索意图，同时保留产品解释空间。英文名用于界面品牌并列展示，方便后续 README、GitHub、Docker 镜像和国际化描述统一。

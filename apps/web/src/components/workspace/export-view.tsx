@@ -3,6 +3,8 @@
 import { useState } from "react";
 import { FileText, Loader2, Network, ShieldAlert } from "lucide-react";
 import { Button } from "@/components/ui/button";
+import { Input } from "@/components/ui/input";
+import { apiUrl, type ApiEnvelope } from "@/lib/api-client";
 import type { BookAnalysisJob, BookAnalysisResult } from "@/stores/workspace-store";
 
 export type BookExportFormat =
@@ -90,7 +92,7 @@ export function ExportView({ job, result, loading, onExport, onOpenHistory }: Ex
 				show={!job || job.status !== "succeeded"}
 				onOpenHistory={onOpenHistory}
 			/>
-			<BookAnalysisPanel result={result} />
+			<BookAnalysisPanel result={result} job={job} />
 		</>
 	);
 }
@@ -281,7 +283,50 @@ function ExportRiskNotice({ mode }: { mode: BookExportMode }) {
 	);
 }
 
-export function BookAnalysisPanel({ result }: { result: BookAnalysisResult | null }) {
+interface BookEvidenceSearchHit {
+	chapterId: string;
+	order: number;
+	title: string;
+	summary: string;
+	plotFunction: string;
+	hook: string;
+	score: number;
+	matchedKeywords: string[];
+	evidenceSnippets: string[];
+	sourceAnchors: Array<{
+		anchorId: string;
+		label: string;
+		quote: string;
+		startOffset: number;
+		endOffset: number;
+	}>;
+	chunkStartOffset: number;
+	chunkEndOffset: number;
+}
+
+interface BookEvidenceSearchResult {
+	mode: string;
+	jobId: string;
+	title: string;
+	query: string;
+	tokenCount: number;
+	totalChunks: number;
+	hitCount: number;
+	hits: BookEvidenceSearchHit[];
+}
+
+export function BookAnalysisPanel({
+	result,
+	job,
+}: {
+	result: BookAnalysisResult | null;
+	job?: BookAnalysisJob | null;
+}) {
+	const [searchQuery, setSearchQuery] = useState("");
+	const [searchLoading, setSearchLoading] = useState(false);
+	const [searchError, setSearchError] = useState("");
+	const [searchResult, setSearchResult] = useState<BookEvidenceSearchResult | null>(null);
+
 	if (!result) {
 		return (
 			<section className="rounded-md border border-border bg-card p-5">
@@ -300,6 +345,35 @@ export function BookAnalysisPanel({ result }: { result: BookAnalysisResult | nul
 	const generationAssets = result.generationAssets;
 	const styleCard = result.transferableStyleCard;
 	const boundaryCheck = result.referenceBoundaryCheck;
+	const searchable = Boolean(
+		job?.id && job.status === "succeeded" && result.mapReduce?.chunkEvidenceIndex?.length,
+	);
+
+	async function runEvidenceSearch() {
+		if (!job?.id || !searchQuery.trim()) {
+			return;
+		}
+
+		setSearchLoading(true);
+		setSearchError("");
+		try {
+			const response = await fetch(
+				apiUrl(
+					`/analysis/book/jobs/${job.id}/search?q=${encodeURIComponent(searchQuery.trim())}&limit=8`,
+				),
+			);
+			const payload = (await response.json()) as ApiEnvelope<BookEvidenceSearchResult>;
+			if (!response.ok || payload.code !== 0) {
+				throw new Error(payload.message || `Request failed: ${response.status}`);
+			}
+			setSearchResult(payload.data);
+		} catch (error) {
+			setSearchError(error instanceof Error ? error.message : String(error));
+			setSearchResult(null);
+		} finally {
+			setSearchLoading(false);
+		}
+	}
 
 	return (
 		<section className="space-y-6">
@@ -368,7 +442,10 @@ export function BookAnalysisPanel({ result }: { result: BookAnalysisResult | nul
 					<div className="mt-5 rounded-md border border-border bg-background p-4 text-sm">
 						<div className="flex items-center justify-between gap-3">
 							<p className="font-semibold">逐章汇总拆解</p>
-							<span>{result.mapReduce.mapCount} 个章节片段</span>
+							<span>
+								{result.mapReduce.chunkCount ?? result.mapReduce.mapCount}{" "}
+								个证据片段
+							</span>
 						</div>
 						<p className="mt-2 text-muted-foreground">{result.mapReduce.reducerNote}</p>
 						<div className="mt-4 grid gap-3 md:grid-cols-2">
@@ -382,9 +459,144 @@ export function BookAnalysisPanel({ result }: { result: BookAnalysisResult | nul
 									</p>
 									<p className="mt-2 text-muted-foreground">{chapter.summary}</p>
 									<p className="mt-2">钩子：{chapter.hook}</p>
+									{chapter.sourceAnchors?.length ? (
+										<div className="mt-2 space-y-1 text-xs text-muted-foreground">
+											{chapter.sourceAnchors.slice(0, 2).map((anchor) => (
+												<p key={anchor.anchorId}>
+													{anchor.label}：{anchor.quote}（
+													{anchor.startOffset} - {anchor.endOffset}）
+												</p>
+											))}
+										</div>
+									) : null}
 								</div>
 							))}
 						</div>
+						{result.mapReduce.chunkEvidenceIndex?.length ? (
+							<div className="mt-4 rounded-md border border-border bg-card p-3">
+								<p className="font-medium">证据索引</p>
+								<p className="mt-1 text-xs text-muted-foreground">
+									已建立可回查的文本片段索引，后续复核可以直接定位到原文偏移位置。
+								</p>
+								<div className="mt-3 space-y-2">
+									{result.mapReduce.chunkEvidenceIndex
+										.slice(0, 3)
+										.map((chunk) => (
+											<div
+												key={`${chunk.chapterId}-${chunk.chunkStartOffset}`}
+											>
+												<p className="text-sm">
+													{chunk.order}. {chunk.title} ·{" "}
+													{chunk.chunkStartOffset} -{" "}
+													{chunk.chunkEndOffset}
+												</p>
+												<p className="text-xs text-muted-foreground">
+													关键词：
+													{chunk.keywords.slice(0, 4).join("、") || "无"}
+												</p>
+											</div>
+										))}
+								</div>
+							</div>
+						) : null}
+						{searchable ? (
+							<div className="mt-4 rounded-md border border-border bg-card p-3">
+								<div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
+									<div>
+										<p className="font-medium">整书内检索</p>
+										<p className="mt-1 text-xs text-muted-foreground">
+											按关键词搜索整书片段、证据摘录和原文锚点。
+										</p>
+									</div>
+									<div className="flex w-full gap-2 sm:max-w-xl">
+										<Input
+											value={searchQuery}
+											onChange={(event) => setSearchQuery(event.target.value)}
+											onKeyDown={(event) => {
+												if (event.key === "Enter") {
+													void runEvidenceSearch();
+												}
+											}}
+											placeholder="例如：旧案信物、主角反击、关系破裂"
+										/>
+										<Button
+											type="button"
+											variant="outline"
+											onClick={() => void runEvidenceSearch()}
+											disabled={searchLoading || !searchQuery.trim()}
+										>
+											{searchLoading ? (
+												<Loader2 className="mr-2 size-4 animate-spin" />
+											) : null}
+											检索
+										</Button>
+									</div>
+								</div>
+								{searchError ? (
+									<p className="mt-3 text-xs text-destructive">{searchError}</p>
+								) : null}
+								{searchResult ? (
+									<div className="mt-4 space-y-3">
+										<p className="text-xs text-muted-foreground">
+											命中 {searchResult.hitCount} /{" "}
+											{searchResult.totalChunks} 个片段
+										</p>
+										{searchResult.hits.length ? (
+											searchResult.hits.map((hit) => (
+												<div
+													key={`${hit.chapterId}-${hit.chunkStartOffset}`}
+													className="rounded-md border border-border bg-background p-3"
+												>
+													<div className="flex flex-wrap items-center gap-2 text-sm">
+														<span className="font-medium">
+															{hit.order}. {hit.title}
+														</span>
+														<span className="text-xs text-muted-foreground">
+															score {hit.score}
+														</span>
+														<span className="text-xs text-muted-foreground">
+															{hit.chunkStartOffset} -{" "}
+															{hit.chunkEndOffset}
+														</span>
+													</div>
+													<p className="mt-2 text-sm text-muted-foreground">
+														{hit.summary}
+													</p>
+													<p className="mt-2 text-xs text-muted-foreground">
+														命中关键词：
+														{hit.matchedKeywords.join("、") || "无"}
+													</p>
+													{hit.evidenceSnippets.length ? (
+														<p className="mt-2 text-xs">
+															证据摘录：
+															{hit.evidenceSnippets.join("；")}
+														</p>
+													) : null}
+													{hit.sourceAnchors.length ? (
+														<div className="mt-2 space-y-1 text-xs text-muted-foreground">
+															{hit.sourceAnchors
+																.slice(0, 3)
+																.map((anchor) => (
+																	<p key={anchor.anchorId}>
+																		{anchor.label}：
+																		{anchor.quote}（
+																		{anchor.startOffset} -{" "}
+																		{anchor.endOffset}）
+																	</p>
+																))}
+														</div>
+													) : null}
+												</div>
+											))
+										) : (
+											<p className="text-xs text-muted-foreground">
+												没有命中结果，可以换一组更具体的关键词。
+											</p>
+										)}
+									</div>
+								) : null}
+							</div>
+						) : null}
 					</div>
 				) : null}
 			</div>

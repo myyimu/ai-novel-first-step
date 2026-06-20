@@ -3,6 +3,7 @@ import { AnalysisPersistenceRepository } from "./analysis-persistence.repository
 import { AskResearchLibraryDto } from "./dto/ask-research-library.dto";
 import { CompareResearchBooksDto } from "./dto/compare-research-books.dto";
 import { ModelProviderService } from "./model-provider.service";
+import { researchQaJsonSchema } from "./analysis-json-schemas";
 import { extractJson } from "./json-extract";
 
 interface ResearchBookResult {
@@ -220,13 +221,32 @@ export class ResearchLibraryService {
             content: this.buildResearchQaPrompt(input, citations),
           },
         ],
-        { maxOutputTokens: 1800 },
+        {
+          maxOutputTokens: 1800,
+          jsonSchema: {
+            name: "research_qa_result",
+            schema: researchQaJsonSchema,
+          },
+        },
       );
-      return this.normalizeResearchQaAnswer(
-        input,
-        citations,
-        this.parseJson(content),
-      );
+      try {
+        return this.normalizeResearchQaAnswer(
+          input,
+          citations,
+          this.parseJson(content),
+        );
+      } catch {
+        const fallback = this.mockResearchQaAnswer(input, citations);
+        return {
+          ...fallback,
+          answer:
+            "模型已返回内容，但结构化 JSON 解析失败。系统已基于当前研究库证据生成兜底回答；你可以稍后重试模型问答。",
+          sourceGaps: [
+            "本次模型问答输出格式异常，未能可靠读取模型原始结论。",
+            ...fallback.sourceGaps,
+          ].slice(0, 5),
+        };
+      }
     }
 
     return this.mockResearchQaAnswer(input, citations);
