@@ -20,9 +20,9 @@
 ## 本地开发
 
 ```bash
-pnpm --filter @ai-novel-first-step/ai-core check
-pnpm --filter @ai-novel-first-step/ai-core test
-pnpm --filter @ai-novel-first-step/ai-core build
+pnpm --filter @ai-novel-diagnosis/ai-core check
+pnpm --filter @ai-novel-diagnosis/ai-core test
+pnpm --filter @ai-novel-diagnosis/ai-core build
 ```
 
 ## 维护原则

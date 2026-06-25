@@ -70,7 +70,7 @@ for (const target of Object.values(targets)) {
 	clean(target.outDir);
 }
 
-run("pnpm", ["--filter", "@ai-novel-first-step/ai-core", "build"]);
+run("pnpm", ["--filter", "@ai-novel-diagnosis/ai-core", "build"]);
 targets.web.prepare();
 targets.api.prepare();
 

@@ -806,7 +806,7 @@ export function buildRelationshipGraphExport(
 	corrections: RelationshipGraphCorrection[] = [],
 ) {
 	return {
-		schemaVersion: "ai-novel-first-step.relationship-graph.v1",
+		schemaVersion: "ai-novel-diagnosis.relationship-graph.v1",
 		book: {
 			title: result.book.title,
 			genre: result.book.genre,

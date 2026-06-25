@@ -23,7 +23,7 @@ importers:
 
   apps/web:
     dependencies:
-      '@ai-novel-first-step/ai-core':
+      '@ai-novel-diagnosis/ai-core':
         specifier: workspace:*
         version: link:../../packages/ai-core
       '@radix-ui/react-avatar':
@@ -145,7 +145,7 @@ importers:
 
   services/api:
     dependencies:
-      '@ai-novel-first-step/ai-core':
+      '@ai-novel-diagnosis/ai-core':
         specifier: workspace:*
         version: link:../../packages/ai-core
       '@electric-sql/pglite':

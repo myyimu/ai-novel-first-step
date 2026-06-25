@@ -156,7 +156,7 @@ describe("relationship graph helpers", () => {
 				totalNodes: 2,
 			}),
 		);
-		expect(exported.schemaVersion).toBe("ai-novel-first-step.relationship-graph.v1");
+		expect(exported.schemaVersion).toBe("ai-novel-diagnosis.relationship-graph.v1");
 		expect(exported.timeline[0]).toEqual(
 			expect.objectContaining({
 				chapter: 2,

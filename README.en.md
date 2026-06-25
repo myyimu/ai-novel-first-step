@@ -1,15 +1,17 @@
-# AI Novel First Step
+# AI Novel Diagnosis Desk
 
 [简体中文](./README.md) | [English](./README.en.md)
 
-[![CI - workspace](https://github.com/myyimu/ai-novel-first-step/actions/workflows/ci.yml/badge.svg)](https://github.com/myyimu/ai-novel-first-step/actions/workflows/ci.yml)
+[![CI - workspace](https://github.com/myyimu/ai-novel-diagnosis/actions/workflows/ci.yml/badge.svg)](https://github.com/myyimu/ai-novel-diagnosis/actions/workflows/ci.yml)
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](./LICENSE)
 
-Want to know what is wrong with your web novel, why it gets no traffic, or why readers drop off in chapter one?
+Do not rush into AI rewriting. First find out why readers do not continue.
 
-AI Novel First Step is a local AI novel diagnosis and book-analysis tool. It helps web novel writers rescue the first chapter first: paste a chapter, find the biggest retention problem, explain whether the issue is the opening, hook, emotion, pacing, setup, or market promise, generate a revision prompt you can copy into your writing AI, then run the chapter again to check whether the problem was actually fixed.
+AI Novel Diagnosis Desk is a local AI novel diagnosis and book-analysis tool. It is not a one-click novel generator. It helps writers answer: what is wrong with my story, why does it get no traffic, and why do readers drop off in chapter one?
 
-It is not a ghostwriting app. It is a local AI diagnosis desk for writers: start by answering "what is wrong with my story and why is nobody reading it?", then move into reference-sample critique, full-book analysis, relationship graphs, and exportable writing assets when needed.
+Paste your first chapter, and it identifies the biggest retention problem, explains the issue with evidence from the text, gives a revision priority, and generates a prompt you can copy into your writing AI. After revision, paste the new version back in and run a retest.
+
+For advanced use, it also supports AI book analysis: characters, relationships, worldbuilding, timelines, story structure, and exportable writing assets for learning mature works without copying them.
 
 > Alpha status: suitable for local experiments, feature validation, and feedback collection. Do not expose it as a production public service yet.
 
@@ -44,9 +46,60 @@ API: http://127.0.0.1:3001/api/v1
 - A retest loop: run the revised chapter again and compare whether the core issue changed.
 - Advanced assets: reference-sample rubrics, full-book character/world analysis, relationship graphs, timelines, and export packs.
 
+## Why Not Use Built-In Review From A One-Click Writing Tool
+
+One-click writing tools are good at producing more text. AI Novel Diagnosis Desk focuses on why the text does not keep readers.
+
+| One-click writing tool | AI Novel Diagnosis Desk |
+| --- | --- |
+| Generates more prose | Finds why readers do not continue |
+| Often gives generic critique | Ties diagnosis to text evidence |
+| Tends to rewrite for you | Explains the cause before giving a revision prompt |
+| Hard to compare before and after | Supports a retest loop |
+| Usually a one-off output | Builds rubrics, relationship graphs, world books, and export assets |
+
+Short version:
+
+```text
+One-click writing tools help you write more. AI Novel Diagnosis Desk helps you understand why the writing does not retain readers.
+```
+
+## How It Diagnoses What Is Wrong
+
+It should not only give a score, and you should not have to blindly trust AI. The report follows one evidence chain:
+
+```text
+Problem -> Text evidence -> Reader reaction -> Revision priority -> Revision prompt -> Retest checklist
+```
+
+It focuses on:
+
+- Where chapter one loses readers.
+- Whether the title/blurb promise matches the chapter experience.
+- Whether the protagonist has a concrete goal, pressure, loss, and choice.
+- Whether payoff, conflict, and emotion arrive too late.
+- Whether exposition blocks the story.
+- Whether the text wastes clicks even when it gets traffic.
+
+It does not predict platform algorithms. It diagnoses whether the text wastes the click it already got.
+
+## Is AI Book Analysis Just Copying
+
+No. AI book analysis is not for copying source works. It extracts structural lessons:
+
+- Character functions.
+- Conflict rhythm.
+- Worldbuilding organization.
+- Relationship evolution.
+- Timelines.
+- Reusable structure.
+- Do-not-copy list.
+
+The principle is: learn structure, do not copy content.
+
 ## Screenshot
 
-![AI Novel First Step workspace](./docs/assets/ai-novel-first-step-home.png)
+![AI Novel Diagnosis Desk workspace](./docs/assets/ai-novel-diagnosis-home.png)
 
 _The interface is evolving quickly; use the current app as the source of truth._
 
@@ -54,6 +107,9 @@ _The interface is evolving quickly; use the current app as the source of truth._
 
 - [Try It In 3 Minutes](#try-it-in-3-minutes)
 - [What You Get](#what-you-get)
+- [Why Not Use Built-In Review From A One-Click Writing Tool](#why-not-use-built-in-review-from-a-one-click-writing-tool)
+- [How It Diagnoses What Is Wrong](#how-it-diagnoses-what-is-wrong)
+- [Is AI Book Analysis Just Copying](#is-ai-book-analysis-just-copying)
 - [Who It Is For](#who-it-is-for)
 - [Recommended Workflow](#recommended-workflow)
 - [Core Capabilities](#core-capabilities)
@@ -332,7 +388,7 @@ pnpm run doctor
 ## Open Source
 
 - License: MIT. See [LICENSE](./LICENSE).
-- Repository: [github.com/myyimu/ai-novel-first-step](https://github.com/myyimu/ai-novel-first-step)
+- Repository: [github.com/myyimu/ai-novel-diagnosis](https://github.com/myyimu/ai-novel-diagnosis)
 - Contact: [xiaoke5211@gmail.com](mailto:xiaoke5211@gmail.com)
 - Contributing: see [CONTRIBUTING.md](./CONTRIBUTING.md)
 - Security policy: see [SECURITY.md](./SECURITY.md)

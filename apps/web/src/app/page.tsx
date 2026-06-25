@@ -7,14 +7,14 @@ export default function HomePage() {
 	const softwareJsonLd = {
 		"@context": "https://schema.org",
 		"@type": "SoftwareApplication",
-		name: "AI小说第一步",
-		alternateName: "AI Novel First Step",
+		name: "AI网文诊断台",
+		alternateName: "AI Novel Diagnosis Desk",
 		url: siteUrl,
 		applicationCategory: "WritingApplication",
 		operatingSystem: "Windows, macOS, Linux",
 		isAccessibleForFree: true,
 		description:
-			"本地 AI 小说诊断与 AI 拆书工具，帮作者找出网文哪里不好、为什么没流量，定位第一章最大流失点并进阶拆解整书关系图谱。",
+			"本地 AI 小说诊断与 AI 拆书工具，定位第一章流失点，用正文证据解释为什么没人追，并进阶拆解整书关系图谱。",
 		creator: {
 			"@type": "Person",
 			name: "myyimu",

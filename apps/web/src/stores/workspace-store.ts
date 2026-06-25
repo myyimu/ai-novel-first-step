@@ -7,7 +7,7 @@ import type {
 	RubricMetric,
 	RubricResult,
 	ScoreResult,
-} from "@ai-novel-first-step/ai-core";
+} from "@ai-novel-diagnosis/ai-core";
 
 export type {
 	ProviderKind,
@@ -867,7 +867,7 @@ const initialWorkspaceState: WorkspaceStoreState = {
 	bookAnalysisCache: [],
 };
 
-const localSettingsStorageKey = "ai-novel-first-step-local-settings";
+const localSettingsStorageKey = "ai-novel-diagnosis-local-settings";
 
 const persistableWorkspaceKeys = [
 	"provider",

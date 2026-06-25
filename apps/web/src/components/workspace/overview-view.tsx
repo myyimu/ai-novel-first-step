@@ -292,13 +292,13 @@ export function OverviewView({
 			<section className="rounded-md border border-border bg-card p-5">
 				<div className="grid gap-4 lg:grid-cols-[1.2fr_0.8fr] lg:items-start">
 					<div>
-						<p className="text-sm text-primary">第一章改稿急诊室</p>
+						<p className="text-sm text-primary">AI网文诊断台</p>
 						<h2 className="mt-2 text-2xl font-semibold tracking-tight">
-							这章为什么没人追读？下一版具体怎么改？
+							别急着重写，先找出小说为什么没人追。
 						</h2>
 						<p className="mt-3 max-w-3xl text-sm leading-6 text-muted-foreground">
-							首页只保留最短闭环：粘贴第一章、生成改稿急诊、复制 Prompt
-							去改、改完再贴回来复诊。样本、整书和研究库都退到进阶区。
+							这不是一键写小说。先粘贴第一章，系统按“问题 → 正文证据 → 读者反应 →
+							修改优先级 → 改稿 Prompt”的链路诊断，改完再贴回来复诊。
 						</p>
 					</div>
 					<div className="grid gap-3">
@@ -322,24 +322,24 @@ export function OverviewView({
 				<PathCard
 					icon={Target}
 					label="第一步"
-					title="找流失点"
-					description="只看一章，先定位读者最可能弃读的地方。"
+					title="找病因"
+					description="只看一章，先定位读者为什么不想继续。"
 					active={!hasQuickResult}
 					done={hasQuickResult}
 				/>
 				<PathCard
 					icon={FileText}
 					label="第二步"
-					title="拿改稿方案"
-					description="把问题转成三条改法和可直接复制给写作 AI 的 Prompt。"
+					title="拿证据链"
+					description="把结论绑定正文证据、读者反应和修改优先级。"
 					active={hasQuickResult}
 					done={hasQuickResult}
 				/>
 				<PathCard
 					icon={CheckCircle2}
 					label="第三步"
-					title="复诊验证"
-					description="贴回改后版本，看分数、最大问题和下一步是否真的变化。"
+					title="改稿复诊"
+					description="贴回改后版本，看最大问题有没有真的变化。"
 					active={Boolean(previousQuickReviewResult && quickReviewResult)}
 					done={Boolean(previousQuickReviewResult && quickReviewResult)}
 				/>

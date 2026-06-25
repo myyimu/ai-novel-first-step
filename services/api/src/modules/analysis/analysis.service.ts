@@ -3,7 +3,7 @@ import type {
   QuickReviewResult,
   RecommendedPlatform,
   RecommendedPlatformId,
-} from "@ai-novel-first-step/ai-core";
+} from "@ai-novel-diagnosis/ai-core";
 import {
   BookAnalysisJobProgress,
   BookAnalysisJobService,
@@ -418,7 +418,7 @@ export class AnalysisService {
     const score = input.text.length > 800 ? 6.8 : 5.2;
 
     return {
-      productName: "新手AI小说第一步",
+      productName: "AI网文诊断台",
       mode: "mock-preview",
       title: input.title,
       rubricId: input.rubricId,

@@ -3,7 +3,7 @@ import { Type } from "class-transformer";
 import type {
   ProviderKind,
   ProviderPresetId,
-} from "@ai-novel-first-step/ai-core";
+} from "@ai-novel-diagnosis/ai-core";
 import {
   IsBoolean,
   IsIn,

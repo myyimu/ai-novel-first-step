@@ -55,8 +55,8 @@ describe("OverviewView", () => {
 	it("renders the workspace status dashboard from supplied state", () => {
 		const html = renderToStaticMarkup(<OverviewView {...baseProps} />);
 
-		expect(html).toContain("第一章改稿急诊室");
-		expect(html).toContain("找流失点");
+		expect(html).toContain("AI网文诊断台");
+		expect(html).toContain("找病因");
 		expect(html).toContain("当前模型");
 		expect(html).toContain("本地演示");
 		expect(html).toContain("深度质检进度");

@@ -1,4 +1,4 @@
-# ai-novel-first-step — Agent Guide
+# ai-novel-diagnosis — Agent Guide
 
 This is the workspace-level guide. **Each sub-project has its own** `CLAUDE.md` **with stack-specific rules** — open the per-project file when working inside that sub-project.
 

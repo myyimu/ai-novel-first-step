@@ -1,15 +1,17 @@
-# AI小说第一步
+# AI网文诊断台
 
 [简体中文](./README.md) | [English](./README.en.md)
 
-[![CI - workspace](https://github.com/myyimu/ai-novel-first-step/actions/workflows/ci.yml/badge.svg)](https://github.com/myyimu/ai-novel-first-step/actions/workflows/ci.yml)
+[![CI - workspace](https://github.com/myyimu/ai-novel-diagnosis/actions/workflows/ci.yml/badge.svg)](https://github.com/myyimu/ai-novel-diagnosis/actions/workflows/ci.yml)
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](./LICENSE)
 
-想知道自己写的小说哪里不好？为什么网文没有流量，读者第一章就流失？
+别急着让 AI 重写，先找出小说为什么没人追。
 
-AI小说第一步是本地 AI 小说诊断与 AI 拆书工具。它帮你先救第一章：粘贴章节，找出最大流失点，解释开头、卖点、情绪、节奏、设定表达或市场承诺哪里出了问题，并生成能直接复制给写作 AI 的改稿 Prompt；改完后再贴回来复诊，看问题是不是真的被解决。
+AI网文诊断台是本地 AI 小说诊断与 AI 拆书工具。它不是一键写小说工具，而是帮作者回答：我的小说哪里不好，为什么没有流量，读者为什么第一章就走？
 
-它不是代写工具，而是面向网文新手的 AI 网文诊断台：先回答“我的小说为什么没人看、为什么没流量、哪里不好”，再逐步进入成熟样本质检、整书拆解、关系图谱和可导出写作资产。
+粘贴第一章，它会定位最大流失点，用正文证据解释问题，给出修改优先级，并生成能直接复制给写作 AI 的改稿 Prompt。改完后再贴回来复诊，看问题是不是真的被解决。
+
+进阶时，它还能做 AI 拆书：拆角色、关系、世界观、时间线和写作结构，帮你学习成熟作品怎么留住读者，而不是照搬内容。
 
 > Alpha 阶段：当前适合本地试用、功能验证和收集反馈，不建议直接作为生产服务暴露到公网。
 
@@ -44,9 +46,60 @@ API: http://127.0.0.1:3001/api/v1
 - 一次复诊对比：改稿前后重新跑，判断这次修改有没有真正解决问题。
 - 一套进阶资产：成熟样本 Rubric、整书角色/世界观拆解、关系图谱、时间线和导出包。
 
+## 为什么不用一键写小说工具内置评审
+
+一键写小说工具更擅长“继续生成文本”。AI网文诊断台更关注“为什么写出来没人追”。
+
+| 一键写小说工具 | AI网文诊断台 |
+| --- | --- |
+| 目标是生成更多正文 | 目标是找出为什么留不住读者 |
+| 审稿常给泛泛建议 | 诊断绑定正文证据 |
+| 容易直接替你重写 | 先解释病因，再给改稿 Prompt |
+| 改前改后难对比 | 支持复诊闭环 |
+| 偏单次输出 | 沉淀 Rubric、关系图谱、世界书和导出资产 |
+
+一句话区别：
+
+```text
+一键写小说帮你写更多；AI网文诊断台帮你看清楚，为什么写出来没人追。
+```
+
+## 它怎么判断小说哪里不好
+
+它不应该只给分，也不要求你盲信 AI。诊断报告会围绕同一条证据链组织：
+
+```text
+问题 -> 正文证据 -> 读者反应 -> 修改优先级 -> 改稿 Prompt -> 复诊检查点
+```
+
+它重点检查：
+
+- 第一章哪里劝退。
+- 标题/简介承诺和正文体验是否断裂。
+- 主角目标、压力、损失和选择是否足够具体。
+- 爽点、冲突、情绪回报是否来得太晚。
+- 设定是否挡住了剧情。
+- 有点击却没追读时，文本是否浪费了这次点击。
+
+它不预测平台算法，只诊断文本有没有浪费你的点击。
+
+## AI 拆书是不是抄书
+
+不是。AI 拆书不是帮你照搬原作，而是把成熟作品拆成结构经验：
+
+- 人物功能。
+- 冲突节奏。
+- 世界观组织。
+- 关系演化。
+- 时间线。
+- 可学习结构。
+- “不要照搬”清单。
+
+核心原则是：学结构，不搬内容。
+
 ## 产品截图
 
-![AI小说第一步改稿急诊室](./docs/assets/ai-novel-first-step-home.png)
+![AI网文诊断台首页](./docs/assets/ai-novel-diagnosis-home.png)
 
 _界面仍在快速迭代中，请以当前版本实际页面为准。_
 
@@ -54,6 +107,9 @@ _界面仍在快速迭代中，请以当前版本实际页面为准。_
 
 - [3 分钟试用](#3-分钟试用)
 - [你会得到什么](#你会得到什么)
+- [为什么不用一键写小说工具内置评审](#为什么不用一键写小说工具内置评审)
+- [它怎么判断小说哪里不好](#它怎么判断小说哪里不好)
+- [AI 拆书是不是抄书](#ai-拆书是不是抄书)
 - [适合谁](#适合谁)
 - [典型使用路径](#典型使用路径)
 - [主要能力](#主要能力)
@@ -340,8 +396,9 @@ pnpm run doctor
 ## 开源信息
 
 - 开源协议：MIT，见 [LICENSE](./LICENSE)。
-- 代码仓库：[github.com/myyimu/ai-novel-first-step](https://github.com/myyimu/ai-novel-first-step)
+- 代码仓库：[github.com/myyimu/ai-novel-diagnosis](https://github.com/myyimu/ai-novel-diagnosis)
 - 联系方式：[xiaoke5211@gmail.com](mailto:xiaoke5211@gmail.com)
+- 产品评审与迭代规划：见 [docs/product-review-roadmap.md](./docs/product-review-roadmap.md)。
 - 贡献说明：见 [CONTRIBUTING.md](./CONTRIBUTING.md)
 - 安全策略：见 [SECURITY.md](./SECURITY.md)
 - GitHub 社交预览图候选稿：见 [docs/assets/github-social-preview.png](./docs/assets/github-social-preview.png)。

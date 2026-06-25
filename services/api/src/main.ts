@@ -54,7 +54,7 @@ async function bootstrap() {
 
   // Setup Swagger documentation
   const config = new DocumentBuilder()
-    .setTitle("新手AI小说第一步 API")
+    .setTitle("AI网文诊断台 API")
     .setDescription(
       "Local-first API for AI web-novel critique, reference analysis, rubric scoring, and BYOK model providers.",
     )

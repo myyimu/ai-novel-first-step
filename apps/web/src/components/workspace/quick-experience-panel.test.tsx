@@ -24,7 +24,7 @@ describe("QuickExperiencePanel", () => {
 			/>,
 		);
 
-		expect(html).toContain("30 秒改稿急诊");
+		expect(html).toContain("30 秒小说诊断");
 		expect(html).toContain("当前 AI: 免费共享算力");
 		expect(html).toContain("生成改稿方案");
 	});

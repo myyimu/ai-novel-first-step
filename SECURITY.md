@@ -2,7 +2,7 @@
 
 ## Supported Status
 
-AI小说第一步 / AI Novel First Step is currently Alpha software. It is intended for local experiments, feature validation, and feedback collection. Do not expose it as a production public service yet.
+AI网文诊断台 / AI Novel Diagnosis Desk is currently Alpha software. It is intended for local experiments, feature validation, and feedback collection. Do not expose it as a production public service yet.
 
 ## Reporting a Vulnerability
 

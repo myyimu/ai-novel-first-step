@@ -1,7 +1,7 @@
 {
-  "name": "@ai-novel-first-step/ai-core",
+  "name": "@ai-novel-diagnosis/ai-core",
   "version": "0.1.0",
-  "description": "Shared analysis contracts for AI小说第一步 triage, critique, full-book assets, and graph review.",
+  "description": "Shared analysis contracts for AI网文诊断台 triage, critique, full-book assets, and graph review.",
   "license": "MIT",
   "files": [
     "dist"

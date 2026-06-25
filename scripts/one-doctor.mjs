@@ -217,7 +217,7 @@ if (!webKustomize.includes("value: /api/v1")) {
 }
 
 const report = {
-	schema: "ai-novel-first-step/one-doctor/v1",
+	schema: "ai-novel-diagnosis/one-doctor/v1",
 	oneVersion: oneVersion.status === 0 ? oneVersion.stdout : null,
 	workspace: manifest?.workspace ?? null,
 	projectCount: manifest?.projects?.length ?? 0,

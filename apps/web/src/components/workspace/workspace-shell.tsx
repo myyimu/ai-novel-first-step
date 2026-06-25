@@ -115,9 +115,9 @@ export function WorkspaceShell<TView extends string>({
 							<ScanText className="size-5" />
 						</div>
 						<div className="min-w-0">
-							<p className="truncate text-sm font-semibold">AI小说第一步</p>
+							<p className="truncate text-sm font-semibold">AI网文诊断台</p>
 							<p className="truncate text-xs text-muted-foreground">
-								AI Novel First Step
+								本地小说诊断与 AI 拆书
 							</p>
 						</div>
 					</div>

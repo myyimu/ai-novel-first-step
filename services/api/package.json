@@ -2,7 +2,7 @@
   "name": "api",
   "version": "0.1.0",
   "private": true,
-  "description": "Local API for AI小说第一步 first-chapter triage, full-book analysis, exports, and graph review.",
+  "description": "Local API for AI网文诊断台 first-chapter triage, full-book analysis, exports, and graph review.",
   "license": "MIT",
   "author": "",
   "scripts": {
@@ -31,7 +31,7 @@
     "check:fix": "pnpm run lint:fix && pnpm run format:fix"
   },
   "dependencies": {
-    "@ai-novel-first-step/ai-core": "workspace:*",
+    "@ai-novel-diagnosis/ai-core": "workspace:*",
     "@electric-sql/pglite": "^0.2.17",
     "@nestjs/common": "^11.1.13",
     "@nestjs/config": "^4.0.3",

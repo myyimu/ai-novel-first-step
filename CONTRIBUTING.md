@@ -1,6 +1,6 @@
 # Contributing
 
-感谢你关注 AI小说第一步 / AI Novel First Step。
+感谢你关注 AI网文诊断台 / AI Novel Diagnosis Desk。
 
 This project is in Alpha. Contributions are welcome, but please keep changes small, testable, and aligned with the local-first, BYOK product direction.
 

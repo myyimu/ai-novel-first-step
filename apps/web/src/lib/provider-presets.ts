@@ -1,4 +1,4 @@
-import type { ProviderPreset, ProviderPresetId } from "@ai-novel-first-step/ai-core";
+import type { ProviderPreset, ProviderPresetId } from "@ai-novel-diagnosis/ai-core";
 
 export const providerPresets: Record<ProviderPresetId, ProviderPreset> = {
 	custom: {

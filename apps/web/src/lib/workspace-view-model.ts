@@ -24,8 +24,8 @@ export const workspaceViewItems: Array<WorkspaceNavItem<WorkspaceView>> = [
 		id: "overview",
 		label: "急诊室",
 		icon: LayoutDashboard,
-		title: "第一章改稿急诊室",
-		description: "粘贴第一章，找出最大流失点，拿到下一版改稿方案，再贴回来复诊。",
+		title: "AI网文诊断台",
+		description: "别急着重写，先找出小说为什么没人追，再拿下一版改稿方案。",
 	},
 	{
 		id: "starter",
@@ -245,7 +245,7 @@ export function buildOverviewNextAction({
 		return {
 			title: "先把第一章贴进急诊室",
 			description:
-				"不用先填样本、平台和复杂参数。先贴正文，系统只回答：这章为什么没人追读，下一版怎么改。",
+				"不用先填样本、平台和复杂参数。先贴正文，系统只回答：这章为什么没人追，下一版先改哪里。",
 			actionLabel: "开始急诊",
 			view: "overview",
 			secondaryLabel: "选择模型",
@@ -257,7 +257,7 @@ export function buildOverviewNextAction({
 		return {
 			title: "先生成改稿急诊",
 			description:
-				"急诊只需要一段正文，会给出定位、卖点、最大流失点、三条改法和可复制的改稿 Prompt。",
+				"诊断只需要一段正文，会给出最大流失点、正文证据、三条改法和可复制的改稿 Prompt。",
 			actionLabel: "回到急诊室",
 			view: "overview",
 			secondaryLabel: "选择模型",

@@ -19,17 +19,18 @@ export async function generateMetadata(): Promise<Metadata> {
 	const siteUrl =
 		process.env.NEXT_PUBLIC_SITE_URL ??
 		(process.env.VERCEL_URL ? `https://${process.env.VERCEL_URL}` : "http://127.0.0.1:3000");
-	const title = "AI小说第一步 | AI小说诊断与AI拆书";
+	const title = "AI网文诊断台 | 别急着重写，先找出小说为什么没人追";
 	const description =
-		"本地 AI 小说诊断与 AI 拆书工具，帮作者找出网文哪里不好、为什么没流量，定位第一章最大流失点并生成可复制的改稿 Prompt。";
+		"本地 AI 小说诊断与 AI 拆书工具，定位第一章流失点，用正文证据解释为什么没人追，并生成可复制的改稿 Prompt。";
 
 	return {
 		metadataBase: new URL(siteUrl),
-		applicationName: "AI小说第一步",
+		applicationName: "AI网文诊断台",
 		title,
 		description,
 		keywords: [
-			"AI小说第一步",
+			"AI网文诊断台",
+			"AI novel diagnosis",
 			"AI拆书",
 			"AI小说诊断",
 			"小说诊断",
@@ -48,7 +49,7 @@ export async function generateMetadata(): Promise<Metadata> {
 		],
 		authors: [{ name: "myyimu" }],
 		creator: "myyimu",
-		publisher: "AI小说第一步",
+		publisher: "AI网文诊断台",
 		category: "writing tools",
 		alternates: {
 			canonical: "/",
@@ -57,7 +58,7 @@ export async function generateMetadata(): Promise<Metadata> {
 			type: "website",
 			locale: "zh_CN",
 			url: "/",
-			siteName: "AI小说第一步",
+			siteName: "AI网文诊断台",
 			title,
 			description,
 		},

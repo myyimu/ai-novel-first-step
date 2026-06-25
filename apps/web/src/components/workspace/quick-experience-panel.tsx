@@ -70,10 +70,10 @@ export function QuickExperiencePanel({
 				<div className="max-w-3xl">
 					<div className="flex items-center gap-2">
 						<Target className="size-5 text-primary" />
-						<h2 className="text-xl font-semibold">30 秒改稿急诊</h2>
+						<h2 className="text-xl font-semibold">30 秒小说诊断</h2>
 					</div>
 					<p className="mt-2 text-sm leading-6 text-muted-foreground">
-						先别填复杂表单。粘贴第一章，直接找最大流失点、保留卖点和下一版改法。
+						先别让 AI 重写。粘贴第一章，先看为什么没人追、证据在哪、下一版先改什么。
 					</p>
 				</div>
 				<div className="rounded-md border border-border bg-background px-3 py-2 text-sm text-muted-foreground">
@@ -126,8 +126,8 @@ export function QuickExperiencePanel({
 				<div className="flex flex-col justify-between gap-3 rounded-md border border-border bg-background p-4">
 					<div className="space-y-2 text-sm text-muted-foreground">
 						<p className="font-medium text-foreground">这一步只回答一个问题：</p>
-						<p>读者会在哪里弃读？</p>
-						<p>跑完后直接拿到下一版改稿 Prompt。</p>
+						<p>为什么写出来没人追？</p>
+						<p>跑完后拿到证据链和下一版改稿 Prompt。</p>
 						{hasCachedResult ? <p>当前文本命中过往结果，默认优先复用缓存。</p> : null}
 					</div>
 					<div className="space-y-2">

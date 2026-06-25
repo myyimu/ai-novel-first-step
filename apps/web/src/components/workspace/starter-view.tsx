@@ -58,7 +58,7 @@ export function StarterView({ digest, onOpenView }: StarterViewProps) {
 					</p>
 				</div>
 				<div className="rounded-md border border-border bg-card p-5">
-					<p className="text-sm text-muted-foreground">First Step</p>
+					<p className="text-sm text-muted-foreground">诊断台方法</p>
 					<p className="mt-3 text-xl font-semibold">看懂爆款</p>
 					<p className="mt-2 text-sm leading-6 text-muted-foreground">
 						先学会拆出爆款为什么成立，再让 AI 执行明确方向。

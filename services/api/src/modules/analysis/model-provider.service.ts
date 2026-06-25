@@ -1,7 +1,7 @@
 import { BadRequestException, Injectable } from "@nestjs/common";
 import { lookup } from "node:dns/promises";
 import { isIP } from "node:net";
-import type { ProviderPreset } from "@ai-novel-first-step/ai-core";
+import type { ProviderPreset } from "@ai-novel-diagnosis/ai-core";
 import { ProviderConfigDto } from "./dto/provider-config.dto";
 
 export interface ProviderMessage {
@@ -362,7 +362,7 @@ export class ModelProviderService {
         headers: {
           "content-type": "application/json",
           apikey: defaultSharedGpuFallback.apiKey,
-          "Client-Agent": "ai-novel-first-step:shared-fallback",
+          "Client-Agent": "ai-novel-diagnosis:shared-fallback",
         },
         body: JSON.stringify({
           prompt,
@@ -397,7 +397,7 @@ export class ModelProviderService {
         `${defaultSharedGpuFallback.baseUrl}/generate/text/status/${queued.id}`,
         {
           headers: {
-            "Client-Agent": "ai-novel-first-step:shared-fallback",
+            "Client-Agent": "ai-novel-diagnosis:shared-fallback",
           },
         },
       );

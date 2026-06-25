@@ -19,7 +19,7 @@
 			}
 		],
 		"paths": {
-			"@ai-novel-first-step/ai-core": ["../../packages/ai-core/src/index.ts"],
+			"@ai-novel-diagnosis/ai-core": ["../../packages/ai-core/src/index.ts"],
 			"@/*": ["./src/*"]
 		}
 	},
