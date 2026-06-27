@@ -1,11 +1,12 @@
 "use client";
 
+import { useState, type ReactNode } from "react";
 import {
 	CheckCircle2,
+	ChevronDown,
 	FileText,
 	KeyRound,
 	Network,
-	Sparkles,
 	Target,
 	TriangleAlert,
 	type LucideIcon,
@@ -26,15 +27,6 @@ interface OverviewStep {
 	detail: string;
 }
 
-interface OverviewNextAction {
-	title: string;
-	description: string;
-	actionLabel: string;
-	view: string;
-	secondaryLabel?: string;
-	secondaryView?: string;
-}
-
 interface OverviewScoreResult {
 	totalScore: number;
 	strongestPoint: string;
@@ -43,13 +35,13 @@ interface OverviewScoreResult {
 }
 
 interface OverviewViewProps {
-	nextAction: OverviewNextAction;
 	providerKind: "mock" | "openai-compatible";
 	providerLabel: string;
 	providerModel: string;
 	quickLoading: boolean;
 	quickElapsedSeconds: number;
 	quickReviewResult: QuickReviewResult | null;
+	quickReviewError?: string | null;
 	previousQuickReviewResult?: QuickReviewResult | null;
 	quickReviewGenre: string;
 	quickReviewInputKind: QuickReviewInputKind;
@@ -113,6 +105,48 @@ function ProgressBar({ value }: { value: number }) {
 	);
 }
 
+function Collapsible({
+	title,
+	hint,
+	rightSlot,
+	defaultOpen = false,
+	children,
+}: {
+	title: ReactNode;
+	hint?: ReactNode;
+	rightSlot?: ReactNode;
+	defaultOpen?: boolean;
+	children: ReactNode;
+}) {
+	const [open, setOpen] = useState(defaultOpen);
+	return (
+		<section className="rounded-md border border-border bg-card">
+			<button
+				type="button"
+				onClick={() => setOpen((value) => !value)}
+				aria-expanded={open}
+				className="flex w-full items-start gap-3 p-5 text-left"
+			>
+				<ChevronDown
+					className={`mt-1 size-4 shrink-0 text-muted-foreground transition-transform ${
+						open ? "rotate-0" : "-rotate-90"
+					}`}
+				/>
+				<div className="min-w-0 flex-1">
+					<div className="text-sm font-medium">{title}</div>
+					{hint ? (
+						<div className="mt-1 text-xs leading-5 text-muted-foreground">{hint}</div>
+					) : null}
+				</div>
+				{rightSlot ? <div className="shrink-0">{rightSlot}</div> : null}
+			</button>
+			{open ? (
+				<div className="border-t border-border px-5 pb-5 pt-4">{children}</div>
+			) : null}
+		</section>
+	);
+}
+
 function PathCard({
 	icon: Icon,
 	label,
@@ -134,7 +168,7 @@ function PathCard({
 				active
 					? "border-primary/50 bg-primary/10"
 					: done
-						? "border-emerald-500/30 bg-emerald-500/5"
+						? "border-success-border bg-success-surface"
 						: "border-border bg-card"
 			}`}
 		>
@@ -162,7 +196,7 @@ function StepStatusList({ steps }: { steps: OverviewStep[] }) {
 					{step.done ? (
 						<CheckCircle2 className="mt-0.5 size-4 shrink-0 text-success-foreground" />
 					) : (
-						<TriangleAlert className="mt-0.5 size-4 shrink-0 text-amber-300" />
+						<TriangleAlert className="mt-0.5 size-4 shrink-0 text-warning-foreground" />
 					)}
 					<div className="min-w-0">
 						<p className="text-sm font-medium">{step.label}</p>
@@ -173,46 +207,6 @@ function StepStatusList({ steps }: { steps: OverviewStep[] }) {
 				</div>
 			))}
 		</div>
-	);
-}
-
-function NextActionPanel({
-	action,
-	providerKind,
-	onOpenView,
-}: {
-	action: OverviewNextAction;
-	providerKind: "mock" | "openai-compatible";
-	onOpenView: (view: string) => void;
-}) {
-	return (
-		<section className="rounded-md border border-primary/30 bg-primary/10 p-5">
-			<div className="flex flex-col gap-4 lg:flex-row lg:items-start lg:justify-between">
-				<div className="min-w-0">
-					<div className="flex items-center gap-2">
-						<Sparkles className="size-5 text-primary" />
-						<h2 className="text-lg font-semibold">下一步只做这件事</h2>
-					</div>
-					<p className="mt-3 text-xl font-semibold">{action.title}</p>
-					<p className="mt-2 max-w-3xl text-sm leading-6 text-muted-foreground">
-						{action.description}
-					</p>
-					{providerKind === "mock" ? (
-						<p className="mt-3 rounded-md border border-warning-border bg-warning-surface px-3 py-2 text-sm text-warning-foreground">
-							当前是本地演示，只能验证流程和报告结构；真实判断需要切换到可用模型服务。
-						</p>
-					) : null}
-				</div>
-				<div className="flex shrink-0 flex-wrap gap-2">
-					<Button onClick={() => onOpenView(action.view)}>{action.actionLabel}</Button>
-					{action.secondaryLabel && action.secondaryView ? (
-						<Button variant="outline" onClick={() => onOpenView(action.secondaryView!)}>
-							{action.secondaryLabel}
-						</Button>
-					) : null}
-				</div>
-			</div>
-		</section>
 	);
 }
 
@@ -259,13 +253,13 @@ function ScoreSummary({
 }
 
 export function OverviewView({
-	nextAction,
 	providerKind,
 	providerLabel,
 	providerModel,
 	quickLoading,
 	quickElapsedSeconds,
 	quickReviewResult,
+	quickReviewError,
 	previousQuickReviewResult,
 	quickReviewGenre,
 	quickReviewInputKind,
@@ -303,7 +297,7 @@ export function OverviewView({
 	onOpenModel,
 	onOpenCritique,
 	onOpenBook,
-	onOpenView,
+	onOpenView: _onOpenView,
 }: OverviewViewProps) {
 	const hasQuickResult = Boolean(quickReviewResult);
 
@@ -332,6 +326,19 @@ export function OverviewView({
 						</div>
 					</div>
 				</div>
+				{providerKind === "mock" ? (
+					<p className="mt-3 rounded-md border border-warning-border bg-warning-surface px-3 py-2 text-sm text-warning-foreground">
+						当前是本地演示模式，只能验证流程和报告结构；真实判断请到 AI
+						设置切换可用模型。
+						<button
+							type="button"
+							onClick={onOpenModel}
+							className="ml-2 underline underline-offset-2 hover:opacity-80"
+						>
+							去切换
+						</button>
+					</p>
+				) : null}
 			</section>
 
 			<QuickExperiencePanel
@@ -340,6 +347,7 @@ export function OverviewView({
 				loading={quickLoading}
 				elapsedSeconds={quickElapsedSeconds}
 				quickReviewResult={quickReviewResult}
+				quickReviewError={quickReviewError ?? null}
 				previousQuickReviewResult={previousQuickReviewResult}
 				quickReviewGenre={quickReviewGenre}
 				quickReviewInputKind={quickReviewInputKind}
@@ -360,14 +368,8 @@ export function OverviewView({
 				onOpenBook={onOpenBook}
 			/>
 
-			<details className="rounded-md border border-border bg-card p-5">
-				<summary className="cursor-pointer list-none text-sm font-medium">
-					诊断闭环
-					<span className="ml-2 text-xs font-normal text-muted-foreground">
-						需要理解流程时再看
-					</span>
-				</summary>
-				<section className="mt-4 grid gap-4 md:grid-cols-3">
+			<Collapsible title="诊断闭环（三步）" hint="需要理解流程时再展开看。">
+				<section className="grid gap-4 md:grid-cols-3">
 					<PathCard
 						icon={Target}
 						label="第一步"
@@ -393,38 +395,31 @@ export function OverviewView({
 						done={Boolean(previousQuickReviewResult && quickReviewResult)}
 					/>
 				</section>
-			</details>
+			</Collapsible>
 
-			<NextActionPanel
-				action={nextAction}
-				providerKind={providerKind}
-				onOpenView={onOpenView}
-			/>
-
-			<details
-				className="rounded-md border border-border bg-card p-5"
-				open={Boolean(scoreResult)}
-			>
-				<summary className="flex cursor-pointer list-none items-start gap-3">
-					<Network className="mt-0.5 size-5 text-primary" />
-					<div className="min-w-0">
-						<h2 className="text-lg font-semibold">进阶能力</h2>
-						<p className="mt-1 text-sm leading-6 text-muted-foreground">
-							深度质检、整书拆解、样本研究和数据快照都在这里。第一次使用可以先不打开。
-						</p>
-					</div>
-					<span className="ml-auto shrink-0 rounded-md border border-border px-2 py-1 text-xs text-muted-foreground">
+			<Collapsible
+				title={
+					<span className="flex items-center gap-2">
+						<Network className="size-4 text-primary" />
+						进阶能力
+					</span>
+				}
+				hint="深度质检、整书拆解、样本研究和数据快照。第一次使用可以先不打开。"
+				rightSlot={
+					<span className="rounded-md border border-border px-2 py-1 text-xs text-muted-foreground">
 						高级
 					</span>
-				</summary>
-				<div className="mt-5 space-y-6">
+				}
+				defaultOpen={Boolean(scoreResult)}
+			>
+				<div className="space-y-6">
 					<section className="grid gap-6 xl:grid-cols-[1fr_0.9fr]">
 						<ScoreSummary scoreResult={scoreResult} onOpenCritique={onOpenCritique} />
 
 						<section className="rounded-md border border-border bg-background p-5">
 							<div className="flex items-center gap-2">
 								<Network className="size-5 text-primary" />
-								<h2 className="text-lg font-semibold">不是第一次使用入口</h2>
+								<h2 className="text-lg font-semibold">整书拆解入口</h2>
 							</div>
 							<div className="mt-4 space-y-4">
 								<div>
@@ -484,7 +479,7 @@ export function OverviewView({
 						</div>
 					</section>
 				</div>
-			</details>
+			</Collapsible>
 		</div>
 	);
 }

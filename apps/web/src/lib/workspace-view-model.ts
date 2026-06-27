@@ -105,19 +105,26 @@ export const workspaceViewItems: Array<WorkspaceNavItem<WorkspaceView>> = [
 
 const primaryWorkspaceViews = new Set<WorkspaceView>([
 	"overview",
-	"dashboard",
-	"methodology",
 	"revisions",
+	"methodology",
+	"provider",
+]);
+
+const advancedWorkspaceViews = new Set<WorkspaceView>([
 	"chapter",
+	"dashboard",
 	"book",
 	"library",
 	"history",
 	"exports",
-	"provider",
 ]);
 
 export function getWorkspaceNavItems() {
 	return workspaceViewItems.filter((item) => primaryWorkspaceViews.has(item.id));
+}
+
+export function getAdvancedWorkspaceNavItems() {
+	return workspaceViewItems.filter((item) => advancedWorkspaceViews.has(item.id));
 }
 
 export function getWorkspaceViewMeta(view: WorkspaceView) {

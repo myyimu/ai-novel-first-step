@@ -9,12 +9,6 @@ describe("quick diagnosis fixture flow", () => {
 		const result = example.result!;
 		const html = renderToStaticMarkup(
 			<OverviewView
-				nextAction={{
-					title: "复制 Prompt，改完回来复诊",
-					description: "先按当前诊断生成的 Prompt 改一版，再贴回来复诊。",
-					actionLabel: "继续诊断",
-					view: "home",
-				}}
 				providerKind="mock"
 				providerLabel="本地演示"
 				providerModel=""

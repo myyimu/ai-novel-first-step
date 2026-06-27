@@ -443,13 +443,13 @@ function resolveGraphQualityTone(
 	if (riskLevel === "good") {
 		return {
 			label: "可信",
-			className: "border-emerald-200 bg-emerald-50 text-emerald-700",
+			className: "border-success-border bg-success-surface text-success-foreground",
 		};
 	}
 	if (riskLevel === "needs-review") {
 		return {
 			label: "需复核",
-			className: "border-amber-200 bg-amber-50 text-amber-700",
+			className: "border-warning-border bg-warning-surface text-warning-foreground",
 		};
 	}
 	return {

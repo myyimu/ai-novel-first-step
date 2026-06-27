@@ -5,6 +5,7 @@ import {
   NotFoundException,
   type OnModuleInit,
 } from "@nestjs/common";
+import { ConfigService } from "@nestjs/config";
 import { mkdir, readdir, readFile, rm, writeFile } from "node:fs/promises";
 import { join } from "node:path";
 import { AnalysisPersistenceRepository } from "./analysis-persistence.repository";
@@ -67,14 +68,20 @@ interface StoredBookAnalysisJob extends BookAnalysisJobSnapshot {}
 export class BookAnalysisJobService implements OnModuleInit {
   private readonly logger = new Logger(BookAnalysisJobService.name);
   private readonly jobs = new Map<string, StoredBookAnalysisJob>();
-  private readonly storageRoot =
-    process.env.ANALYSIS_STORAGE_DIR?.trim() ||
-    join(process.cwd(), ".local", "analysis");
-  private readonly artifactRoot =
-    process.env.ANALYSIS_ARTIFACT_DIR?.trim() ||
-    join(process.cwd(), ".local", "artifacts");
+  private readonly storageRoot: string;
+  private readonly artifactRoot: string;
 
-  constructor(private readonly repository: AnalysisPersistenceRepository) {}
+  constructor(
+    private readonly repository: AnalysisPersistenceRepository,
+    configService: ConfigService,
+  ) {
+    this.storageRoot =
+      configService.get<string>("analysis.storageDir") ||
+      join(process.cwd(), ".local", "analysis");
+    this.artifactRoot =
+      configService.get<string>("analysis.artifactDir") ||
+      join(process.cwd(), ".local", "artifacts");
+  }
 
   async onModuleInit() {
     await this.repository.markInterruptedJobsFailed();

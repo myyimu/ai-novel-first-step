@@ -1,7 +1,6 @@
 "use client";
 
-import { useState } from "react";
-import { CheckCircle2, Clipboard, Loader2, Target } from "lucide-react";
+import { CheckCircle2, Clipboard, Loader2, Target, TriangleAlert } from "lucide-react";
 import { Button } from "../ui/button";
 import { Label } from "../ui/label";
 import type { DiagnosisExampleOption } from "@/lib/diagnosis-examples";
@@ -19,6 +18,7 @@ export function QuickExperiencePanel({
 	loading,
 	elapsedSeconds,
 	quickReviewResult,
+	quickReviewError,
 	previousQuickReviewResult,
 	quickReviewGenre,
 	quickReviewInputKind,
@@ -43,6 +43,7 @@ export function QuickExperiencePanel({
 	loading: boolean;
 	elapsedSeconds: number;
 	quickReviewResult: QuickReviewResult | null;
+	quickReviewError?: string | null;
 	previousQuickReviewResult?: QuickReviewResult | null;
 	quickReviewGenre: string;
 	quickReviewInputKind: QuickReviewInputKind;
@@ -62,8 +63,9 @@ export function QuickExperiencePanel({
 	onOpenCritique: () => void;
 	onOpenBook: () => void;
 }) {
-	const [selectedExampleId, setSelectedExampleId] = useState(diagnosisExamples[0]?.id ?? "");
-	const selectedExample = diagnosisExamples.find((example) => example.id === selectedExampleId);
+	const MIN_CHAR_COUNT = 50;
+	const trimmedLength = chapterText.trim().length;
+	const isChapterTooShort = trimmedLength < MIN_CHAR_COUNT;
 	const sellingPoints = Array.isArray(quickReviewResult?.sellingPoints)
 		? quickReviewResult.sellingPoints.filter(Boolean)
 		: [];
@@ -116,7 +118,25 @@ export function QuickExperiencePanel({
 			</div>
 			<div className="mt-5 grid gap-4 xl:grid-cols-[1fr_220px]">
 				<div>
-					<Label htmlFor="quick-chapter-text">把你最想救的一章粘贴到这里</Label>
+					<div className="flex flex-wrap items-center justify-between gap-2">
+						<Label htmlFor="quick-chapter-text">把你最想救的一章粘贴到这里</Label>
+						{diagnosisExamples.length ? (
+							<div className="flex flex-wrap items-center gap-1.5 text-xs">
+								<span className="text-muted-foreground">没稿子？试示例：</span>
+								{diagnosisExamples.map((example) => (
+									<button
+										key={example.id}
+										type="button"
+										onClick={() => onUseExample(example.id)}
+										disabled={loading}
+										className="rounded-full border border-border bg-background px-2.5 py-1 text-xs text-muted-foreground transition-colors hover:border-primary/40 hover:bg-primary/5 hover:text-primary disabled:cursor-not-allowed disabled:opacity-50"
+									>
+										{example.label}
+									</button>
+								))}
+							</div>
+						) : null}
+					</div>
 					<textarea
 						id="quick-chapter-text"
 						value={chapterText}
@@ -124,6 +144,21 @@ export function QuickExperiencePanel({
 						className="mt-2 min-h-48 w-full resize-y rounded-md border border-input bg-background px-3 py-2 text-sm leading-6 outline-none focus-visible:ring-2 focus-visible:ring-ring"
 						placeholder="至少 50 字。推荐粘贴第一章或最近卡住的一章。"
 					/>
+					<div className="mt-1.5 flex items-center justify-between text-xs">
+						<span
+							className={
+								isChapterTooShort && trimmedLength > 0
+									? "text-warning-foreground"
+									: "text-muted-foreground"
+							}
+						>
+							{trimmedLength === 0
+								? `至少需要 ${MIN_CHAR_COUNT} 字`
+								: isChapterTooShort
+									? `当前 ${trimmedLength} 字，还差 ${MIN_CHAR_COUNT - trimmedLength} 字`
+									: `当前 ${trimmedLength} 字 ✓`}
+						</span>
+					</div>
 					<details className="mt-4 rounded-md border border-border bg-background p-3">
 						<summary className="cursor-pointer list-none text-sm font-medium">
 							可选：指定题材、稿件来源和上一条 Prompt
@@ -189,64 +224,38 @@ export function QuickExperiencePanel({
 						</div>
 					</details>
 				</div>
-				<div className="flex flex-col justify-between gap-3 rounded-md border border-border bg-background p-4">
-					<div className="space-y-2 text-sm text-muted-foreground">
-						<p className="font-medium text-foreground">这一步只回答一个问题：</p>
-						<p>为什么写出来没人追？</p>
-						<p>跑完后拿到证据链和下一版改稿 Prompt。</p>
-						{hasCachedResult ? <p>当前文本命中过往结果，默认优先复用缓存。</p> : null}
-					</div>
-					<div className="space-y-2">
-						<Button className="w-full" onClick={onRun} disabled={loading}>
-							{loading ? <Loader2 className="mr-2 size-4 animate-spin" /> : null}
-							生成改稿方案
-						</Button>
-						{hasCachedResult ? (
-							<Button
-								className="w-full"
-								variant="outline"
-								onClick={onRerun}
-								disabled={loading}
-							>
-								重新分析
-							</Button>
-						) : null}
-						{diagnosisExamples.length ? (
-							<select
-								aria-label="选择示例章节"
-								className="h-10 w-full rounded-md border border-input bg-background px-3 text-sm"
-								value={selectedExampleId}
-								onChange={(event) => setSelectedExampleId(event.target.value)}
-								disabled={loading}
-							>
-								{diagnosisExamples.map((example) => (
-									<option key={example.id} value={example.id}>
-										{example.label}
-									</option>
-								))}
-							</select>
-						) : null}
-						{selectedExample ? (
-							<div className="rounded-md border border-border bg-card p-3 text-xs leading-5 text-muted-foreground">
-								<p className="font-medium text-foreground">
-									示例会展示：
-									{formatIssueCategory(selectedExample.topIssueCategory)}
-								</p>
-								<p className="mt-1">下一步：{selectedExample.nextAction}</p>
-							</div>
-						) : null}
+				<div className="flex flex-col gap-2 rounded-md border border-border bg-background p-4">
+					<Button
+					className="w-full"
+					onClick={onRun}
+					disabled={loading || isChapterTooShort}
+				>
+						{loading ? <Loader2 className="mr-2 size-4 animate-spin" /> : null}
+						生成改稿方案
+					</Button>
+					{hasCachedResult ? (
 						<Button
 							className="w-full"
 							variant="outline"
-							onClick={() => onUseExample(selectedExampleId)}
+							onClick={onRerun}
 							disabled={loading}
 						>
-							填入示例章节
+							重新分析
 						</Button>
-						<Button className="w-full" variant="outline" onClick={onOpenModel}>
-							选择模型
-						</Button>
-					</div>
+					) : null}
+					<Button
+						className="w-full"
+						variant="ghost"
+						size="sm"
+						onClick={onOpenModel}
+					>
+						选择模型
+					</Button>
+					{hasCachedResult ? (
+						<p className="mt-1 text-xs leading-5 text-muted-foreground">
+							当前文本命中过往结果，默认优先复用缓存。
+						</p>
+					) : null}
 				</div>
 			</div>
 			{loading ? (
@@ -284,8 +293,29 @@ export function QuickExperiencePanel({
 					</ol>
 				</div>
 			) : null}
+			{!loading && !quickReviewResult && quickReviewError ? (
+				<div className="mt-5 rounded-md border border-warning-border bg-warning-surface p-4 text-warning-foreground">
+					<div className="flex items-start gap-3">
+						<TriangleAlert className="mt-0.5 size-5 shrink-0" />
+						<div className="min-w-0 flex-1">
+							<p className="text-sm font-semibold">诊断未完成</p>
+							<p className="mt-1 text-sm leading-6 break-words">
+								{quickReviewError}
+							</p>
+							<div className="mt-3 flex flex-wrap gap-2">
+								<Button size="sm" onClick={onRun} disabled={loading}>
+									重试
+								</Button>
+								<Button size="sm" variant="outline" onClick={onOpenModel}>
+									切换模型
+								</Button>
+							</div>
+						</div>
+					</div>
+				</div>
+			) : null}
 			{quickReviewResult ? (
-				<div className="mt-5 space-y-4 rounded-md border border-emerald-500/30 bg-emerald-500/5 p-5">
+				<div className="mt-5 space-y-4 rounded-md border border-success-border bg-success-surface p-5">
 					<div className="flex items-center gap-2">
 						<CheckCircle2 className="size-5 text-success-foreground" />
 						<h3 className="text-base font-semibold">改稿急诊结果：{quickScore}</h3>
@@ -348,7 +378,7 @@ export function QuickExperiencePanel({
 							)}
 						</ul>
 					</div>
-					<div className="rounded-md border border-amber-500/30 bg-amber-500/5 p-3">
+					<div className="rounded-md border border-warning-border bg-warning-surface p-3">
 						<p className="text-sm font-medium text-warning-foreground">最大追读问题</p>
 						<p className="mt-1 text-sm leading-6">
 							{quickReviewResult.mainProblem ||
@@ -639,7 +669,7 @@ function buildGateView(result: QuickReviewResult | null) {
 	const map = {
 		continue: {
 			label: "可继续打磨",
-			className: "border-emerald-500/40 bg-emerald-500/10 text-success-foreground",
+			className: "border-success-border bg-success-surface text-success-foreground",
 		},
 		revise: {
 			label: "先修改关键问题",
@@ -647,7 +677,7 @@ function buildGateView(result: QuickReviewResult | null) {
 		},
 		rebuild: {
 			label: "建议重构这一版",
-			className: "border-amber-500/40 bg-amber-500/10 text-warning-foreground",
+			className: "border-warning-border bg-warning-surface text-warning-foreground",
 		},
 		discard: {
 			label: "当前版本不建议继续投入",

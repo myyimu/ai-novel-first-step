@@ -329,9 +329,9 @@ function formatScoreDelta(value: number | null) {
 
 function formatPromptOutcomeClass(status: string) {
 	const map: Record<string, string> = {
-		effective: "border-emerald-500/30 bg-emerald-500/5",
+		effective: "border-success-border bg-success-surface",
 		partial: "border-primary/30 bg-primary/10",
-		ineffective: "border-amber-500/30 bg-amber-500/5",
+		ineffective: "border-warning-border bg-warning-surface",
 		unknown: "border-border bg-background",
 	};
 

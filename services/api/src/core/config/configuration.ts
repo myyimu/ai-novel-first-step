@@ -19,6 +19,7 @@
 import { Logger } from "@nestjs/common";
 import { registerAs } from "@nestjs/config";
 import { randomBytes } from "node:crypto";
+import { join } from "node:path";
 
 const configLogger = new Logger("Config");
 
@@ -58,4 +59,18 @@ export const appConfig = registerAs("app", () => ({
     "/health",
   ],
   authGuardExcludePaths: ["/metrics", "/health"],
+}));
+
+export const analysisConfig = registerAs("analysis", () => ({
+  // Local-first storage root for analysis uploads (snapshots, raw/normalized text).
+  storageDir:
+    process.env.ANALYSIS_STORAGE_DIR?.trim() ||
+    join(process.cwd(), ".local", "analysis"),
+  // Local-first storage root for async book-analysis job artifacts (chapter map files).
+  artifactDir:
+    process.env.ANALYSIS_ARTIFACT_DIR?.trim() ||
+    join(process.cwd(), ".local", "artifacts"),
+  // Optional symmetric key for AES-256-GCM encryption of upload artifacts.
+  // When unset, uploads are stored as plaintext (local-only dev mode).
+  storageKey: process.env.ANALYSIS_STORAGE_KEY?.trim() || undefined,
 }));

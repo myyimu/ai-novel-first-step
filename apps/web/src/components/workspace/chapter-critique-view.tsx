@@ -1143,7 +1143,7 @@ function getScoreProgressMeta(status: ScoreProgressStatus) {
 		return {
 			label: "失败",
 			icon: TriangleAlert,
-			className: "border-amber-500/30 bg-amber-500/10 text-amber-300",
+			className: "border-warning-border bg-warning-surface text-warning-foreground",
 			iconClassName: "",
 		};
 	}

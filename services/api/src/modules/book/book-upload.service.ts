@@ -4,6 +4,7 @@ import {
   Logger,
   NotFoundException,
 } from "@nestjs/common";
+import { ConfigService } from "@nestjs/config";
 import {
   createCipheriv,
   createDecipheriv,
@@ -36,19 +37,22 @@ export interface CreateUploadInput {
 @Injectable()
 export class BookUploadService {
   private readonly logger = new Logger(BookUploadService.name);
-  private readonly storageRoot =
-    process.env.ANALYSIS_STORAGE_DIR?.trim() ||
-    join(process.cwd(), ".local", "analysis");
-  private readonly encryptionKey = process.env.ANALYSIS_STORAGE_KEY?.trim()
-    ? createHash("sha256")
-        .update(process.env.ANALYSIS_STORAGE_KEY.trim())
-        .digest()
-    : undefined;
+  private readonly storageRoot: string;
+  private readonly encryptionKey: Buffer | undefined;
 
   constructor(
     private readonly repository: AnalysisPersistenceRepository,
     private readonly textPreprocessor: TextPreprocessorService,
-  ) {}
+    configService: ConfigService,
+  ) {
+    this.storageRoot =
+      configService.get<string>("analysis.storageDir") ||
+      join(process.cwd(), ".local", "analysis");
+    const storageKey = configService.get<string>("analysis.storageKey");
+    this.encryptionKey = storageKey
+      ? createHash("sha256").update(storageKey).digest()
+      : undefined;
+  }
 
   async createUpload(
     input: CreateUploadInput,

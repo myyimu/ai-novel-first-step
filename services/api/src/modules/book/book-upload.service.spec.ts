@@ -22,25 +22,20 @@ describe("normalizeUploadFilename", () => {
   });
 });
 
+function makeConfigService(overrides?: Record<string, unknown>) {
+  const store: Record<string, unknown> = { ...overrides };
+  return {
+    get: jest.fn((key: string) => store[key]),
+  };
+}
+
 describe("BookUploadService", () => {
-  const originalStorageDir = process.env.ANALYSIS_STORAGE_DIR;
-  const originalStorageKey = process.env.ANALYSIS_STORAGE_KEY;
-
-  afterEach(() => {
-    if (originalStorageDir === undefined) {
-      delete process.env.ANALYSIS_STORAGE_DIR;
-    } else {
-      process.env.ANALYSIS_STORAGE_DIR = originalStorageDir;
-    }
-    if (originalStorageKey === undefined) {
-      delete process.env.ANALYSIS_STORAGE_KEY;
-    } else {
-      process.env.ANALYSIS_STORAGE_KEY = originalStorageKey;
-    }
-  });
-
   it("rejects missing or empty TXT files with an actionable message", async () => {
-    const service = new BookUploadService({} as never, {} as never);
+    const service = new BookUploadService(
+      {} as never,
+      {} as never,
+      makeConfigService() as never,
+    );
 
     await expect(
       service.createUpload({
@@ -53,8 +48,6 @@ describe("BookUploadService", () => {
 
   it("stores upload artifacts as plaintext by default", async () => {
     const storageDir = await mkdtemp(join(tmpdir(), "book-upload-plain-"));
-    process.env.ANALYSIS_STORAGE_DIR = storageDir;
-    delete process.env.ANALYSIS_STORAGE_KEY;
 
     try {
       const service = new BookUploadService(
@@ -86,6 +79,9 @@ describe("BookUploadService", () => {
             },
           }),
         } as never,
+        makeConfigService({
+          "analysis.storageDir": storageDir,
+        }) as never,
       );
 
       const upload = await service.createUpload({
@@ -107,8 +103,6 @@ describe("BookUploadService", () => {
 
   it("encrypts upload artifacts when ANALYSIS_STORAGE_KEY is set", async () => {
     const storageDir = await mkdtemp(join(tmpdir(), "book-upload-encrypted-"));
-    process.env.ANALYSIS_STORAGE_DIR = storageDir;
-    process.env.ANALYSIS_STORAGE_KEY = "local privacy mode test key";
 
     try {
       const service = new BookUploadService(
@@ -140,6 +134,10 @@ describe("BookUploadService", () => {
             },
           }),
         } as never,
+        makeConfigService({
+          "analysis.storageDir": storageDir,
+          "analysis.storageKey": "local privacy mode test key",
+        }) as never,
       );
 
       const upload = await service.createUpload({

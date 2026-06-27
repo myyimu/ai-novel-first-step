@@ -8,7 +8,7 @@ import {
   MinLength,
   ValidateNested,
 } from "class-validator";
-import { ProviderConfigDto } from "./provider-config.dto";
+import { ProviderConfigDto } from "@/modules/ai-provider/dto/provider-config.dto";
 
 export class AnalyzeBookDto {
   @ApiProperty({ type: ProviderConfigDto })

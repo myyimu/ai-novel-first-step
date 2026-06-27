@@ -1,10 +1,10 @@
 import { BadRequestException, Injectable } from "@nestjs/common";
-import { AnalysisPersistenceRepository } from "./analysis-persistence.repository";
+import { AnalysisPersistenceRepository } from "@/modules/book/analysis-persistence.repository";
 import { AskResearchLibraryDto } from "./dto/ask-research-library.dto";
 import { CompareResearchBooksDto } from "./dto/compare-research-books.dto";
-import { ModelProviderService } from "./model-provider.service";
-import { researchQaJsonSchema } from "./analysis-json-schemas";
-import { extractJson } from "./json-extract";
+import { ModelProviderService } from "@/modules/ai-provider/model-provider.service";
+import { researchQaJsonSchema } from "@/modules/analysis/analysis-json-schemas";
+import { extractJson } from "@/modules/ai-provider/json-extract";
 
 interface ResearchBookResult {
   book?: {

@@ -10,7 +10,7 @@ import {
   MinLength,
   ValidateNested,
 } from "class-validator";
-import { ProviderConfigDto } from "./provider-config.dto";
+import { ProviderConfigDto } from "@/modules/ai-provider/dto/provider-config.dto";
 import { PlatformStrategyDto } from "./platform-strategy.dto";
 
 export class BuildRubricDto extends PlatformStrategyDto {
