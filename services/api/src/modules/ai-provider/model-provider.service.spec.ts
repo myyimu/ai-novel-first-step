@@ -121,6 +121,38 @@ describe("ModelProviderService shared-gpu fallback", () => {
     });
   });
 
+  it("lists models from OpenAI-compatible providers", async () => {
+    const fetchMock = jest.fn().mockResolvedValue({
+      ok: true,
+      json: async () => ({
+        data: [{ id: "qwen-plus" }, { id: "qwen-max" }, { id: "qwen-plus" }],
+      }),
+    });
+    global.fetch = fetchMock as never;
+
+    const service = new ModelProviderService();
+    const result = await service.listModels({
+      preset: "custom",
+      kind: "openai-compatible",
+      baseUrl: "https://dashscope.aliyuncs.com/compatible-mode/v1",
+      apiKey: "sk-test",
+      model: "",
+      temperature: 0.2,
+      jsonMode: false,
+    });
+
+    expect(result.models).toEqual(["qwen-max", "qwen-plus"]);
+    expect(fetchMock).toHaveBeenCalledWith(
+      "https://dashscope.aliyuncs.com/compatible-mode/v1/models",
+      expect.objectContaining({
+        method: "GET",
+        headers: expect.objectContaining({
+          authorization: "Bearer sk-test",
+        }),
+      }),
+    );
+  });
+
   it("rejects custom provider URLs that point to localhost", async () => {
     const fetchMock = jest.fn();
     global.fetch = fetchMock as never;

@@ -260,7 +260,7 @@ AI 生成稿诊断与 Prompt 迭代：
 
 普通试用优先看上面的 [3 分钟试用](#3-分钟试用)。本节主要给开发者和需要调试启动参数的用户。
 
-`scripts/start-local.cmd` 会先做环境检测，再进入启动流程：检查 Node.js / pnpm，缺依赖时引导安装，自动执行缺失的 `pnpm install`，复用健康运行的本项目服务，端口被占用时尝试附近端口，并把 API / Web 日志写入 `.local/run-logs`。
+`scripts/start-local.cmd` 会先做环境检测，再进入启动流程：检查 Node.js / pnpm，缺依赖时会优先使用正常 pnpm 安装；如果当前盘符不支持依赖链接，会自动改用本地包复制 fallback；遇到普通损坏的 `node_modules` 会清理后重试一次；随后自动重启本项目已有 API / Web 服务，端口被其他服务占用时尝试附近端口，并把 API / Web 日志写入 `.local/run-logs`。
 
 共享模型不可用或排队较久时，可以在页面的“AI 设置”切换自己的模型服务。
 
@@ -295,11 +295,11 @@ Windows 本地一键启动脚本支持常用参数：
 scripts/start-local.cmd
 scripts/start-local.cmd -a
 pnpm run start:local -- -NoBrowser
-pnpm run start:local -- -Kill
+pnpm run start:local -- -Reuse
 pnpm run start:local -- -WebPort 3100 -ApiPort 3101
 ```
 
-`scripts/start-local.cmd` 是最适合双击的新手入口；`pnpm run start:local` 更适合开发者传递 `-NoBrowser`、`-Kill`、`-WebPort`、`-ApiPort` 等 PowerShell 参数。脚本会打开两个 PowerShell 窗口，分别启动 `api` 和 `web`，并自动设置：
+`scripts/start-local.cmd` 是最适合双击的新手入口；默认会重启本项目旧服务，不需要手动杀端口。`pnpm run start:local` 更适合开发者传递 `-NoBrowser`、`-Reuse`、`-WebPort`、`-ApiPort` 等 PowerShell 参数。脚本会打开两个 PowerShell 窗口，分别启动 `api` 和 `web`，并自动设置：
 
 ```text
 Web: http://127.0.0.1:3000

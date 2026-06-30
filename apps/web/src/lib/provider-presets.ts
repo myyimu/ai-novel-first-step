@@ -1,15 +1,6 @@
 import type { ProviderPreset, ProviderPresetId } from "@ai-novel-diagnosis/ai-core";
 
 export const providerPresets: Record<ProviderPresetId, ProviderPreset> = {
-	custom: {
-		label: "自定义模型服务",
-		kind: "openai-compatible",
-		baseUrl: "",
-		model: "",
-		modelOptions: [],
-		jsonMode: false,
-		needsApiKey: true,
-	},
 	"shared-gpu": {
 		label: "免费共享算力",
 		kind: "openai-compatible",
@@ -20,19 +11,15 @@ export const providerPresets: Record<ProviderPresetId, ProviderPreset> = {
 		needsApiKey: false,
 		notice: "默认可直接使用。若服务端未配置专用共享线路，系统会自动回退到匿名公共共享池；可能排队、变慢、失败、可分析字数变少或输出质量波动，不建议上传未授权原文、隐私内容或商业机密。",
 	},
-	deepseek: {
-		label: "DeepSeek",
-		kind: "openai-compatible",
-		baseUrl: "https://api.deepseek.com/v1",
-		model: "deepseek-chat",
-		modelOptions: ["deepseek-chat", "deepseek-reasoner"],
-		jsonMode: false,
-		needsApiKey: true,
-	},
 	doubao: {
 		label: "豆包/火山方舟",
 		kind: "openai-compatible",
 		baseUrl: "https://ark.cn-beijing.volces.com/api/v3",
+		baseUrlOptions: [
+			{ label: "火山方舟标准推理", url: "https://ark.cn-beijing.volces.com/api/v3" },
+			{ label: "火山方舟 Coding", url: "https://ark.cn-beijing.volces.com/api/coding/v3" },
+			{ label: "火山方舟 Plan", url: "https://ark.cn-beijing.volces.com/api/plan/v3" },
+		],
 		model: "doubao-seed-1-6",
 		modelOptions: ["doubao-seed-1-6"],
 		jsonMode: false,
@@ -42,6 +29,16 @@ export const providerPresets: Record<ProviderPresetId, ProviderPreset> = {
 		label: "阿里云百炼/通义千问",
 		kind: "openai-compatible",
 		baseUrl: "https://dashscope.aliyuncs.com/compatible-mode/v1",
+		baseUrlOptions: [
+			{
+				label: "百炼中国站",
+				url: "https://dashscope.aliyuncs.com/compatible-mode/v1",
+			},
+			{
+				label: "百炼国际站",
+				url: "https://dashscope-intl.aliyuncs.com/compatible-mode/v1",
+			},
+		],
 		model: "qwen-plus",
 		modelOptions: [
 			"qwen-plus",
@@ -62,22 +59,72 @@ export const providerPresets: Record<ProviderPresetId, ProviderPreset> = {
 		jsonMode: false,
 		needsApiKey: true,
 	},
+	deepseek: {
+		label: "DeepSeek",
+		kind: "openai-compatible",
+		baseUrl: "https://api.deepseek.com/v1",
+		baseUrlOptions: [{ label: "DeepSeek 官方 API", url: "https://api.deepseek.com/v1" }],
+		model: "deepseek-chat",
+		modelOptions: ["deepseek-chat", "deepseek-reasoner"],
+		jsonMode: false,
+		needsApiKey: true,
+	},
 	ollama: {
 		label: "Ollama 本地模型",
 		kind: "openai-compatible",
 		baseUrl: "http://localhost:11434/v1",
+		baseUrlOptions: [{ label: "本机 Ollama", url: "http://localhost:11434/v1" }],
 		model: "qwen2.5:7b",
 		modelOptions: ["qwen2.5:7b", "qwen3:8b", "llama3.1:8b"],
 		jsonMode: false,
 		needsApiKey: false,
 	},
+	mock: {
+		label: "本地演示",
+		kind: "mock",
+		baseUrl: "",
+		model: "",
+		modelOptions: [],
+		jsonMode: false,
+		needsApiKey: false,
+		notice: "只使用本地演示结果，不会调用真实模型。适合快速熟悉流程；真实点评请切换到共享站、付费模型或本地 Ollama。",
+	},
+	custom: {
+		label: "自定义 / 中转服务",
+		kind: "openai-compatible",
+		baseUrl: "",
+		baseUrlOptions: [
+			{ label: "new-api 中转", url: "https://new-api.rugao.me/v1" },
+			{ label: "OpenAI 官方", url: "https://api.openai.com/v1" },
+		],
+		model: "",
+		modelOptions: ["deepseek-v4-flash"],
+		jsonMode: false,
+		needsApiKey: true,
+	},
 	"new-api": {
 		label: "new-api（DeepSeek 兼容）",
 		kind: "openai-compatible",
 		baseUrl: "https://new-api.rugao.me/v1",
+		baseUrlOptions: [{ label: "内置 new-api", url: "https://new-api.rugao.me/v1" }],
 		model: "deepseek-v4-flash",
 		modelOptions: ["deepseek-v4-flash"],
 		jsonMode: false,
 		needsApiKey: true,
 	},
 };
+
+export const providerPresetOrder: ProviderPresetId[] = [
+	"shared-gpu",
+	"doubao",
+	"qwen",
+	"deepseek",
+	"custom",
+	"ollama",
+	"mock",
+];
+
+export const providerPresetOptions = providerPresetOrder.map((id) => ({
+	id,
+	preset: providerPresets[id],
+}));

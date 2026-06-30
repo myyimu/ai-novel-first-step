@@ -66,19 +66,17 @@ interface OpenAICompatibleChatResponse {
   choices?: OpenAICompatibleChatChoice[];
 }
 
-const providerPresets: Array<
-  ProviderPreset & { id: NonNullable<ProviderConfigDto["preset"]> }
-> = [
-  {
-    id: "custom",
-    label: "自定义 OpenAI-compatible",
-    kind: "openai-compatible",
-    baseUrl: "",
-    model: "",
-    modelOptions: [],
-    jsonMode: false,
-    needsApiKey: true,
-  },
+interface OpenAICompatibleModelListResponse {
+  data?: Array<{ id?: string; owned_by?: string } | string>;
+  models?: Array<{ id?: string; name?: string } | string>;
+}
+
+type ProviderPresetWithId = ProviderPreset & {
+  id: string;
+  baseUrlOptions?: Array<{ label: string; url: string }>;
+};
+
+const providerPresets: ProviderPresetWithId[] = [
   {
     id: "shared-gpu",
     label: "免费共享算力",
@@ -90,20 +88,24 @@ const providerPresets: Array<
     needsApiKey: false,
   },
   {
-    id: "deepseek",
-    label: "DeepSeek",
-    kind: "openai-compatible",
-    baseUrl: "https://api.deepseek.com/v1",
-    model: "deepseek-chat",
-    modelOptions: ["deepseek-chat", "deepseek-reasoner"],
-    jsonMode: false,
-    needsApiKey: true,
-  },
-  {
     id: "doubao",
     label: "豆包/火山方舟",
     kind: "openai-compatible",
     baseUrl: "https://ark.cn-beijing.volces.com/api/v3",
+    baseUrlOptions: [
+      {
+        label: "火山方舟标准推理",
+        url: "https://ark.cn-beijing.volces.com/api/v3",
+      },
+      {
+        label: "火山方舟 Coding",
+        url: "https://ark.cn-beijing.volces.com/api/coding/v3",
+      },
+      {
+        label: "火山方舟 Plan",
+        url: "https://ark.cn-beijing.volces.com/api/plan/v3",
+      },
+    ],
     model: "doubao-seed-1-6",
     modelOptions: ["doubao-seed-1-6"],
     jsonMode: false,
@@ -114,6 +116,16 @@ const providerPresets: Array<
     label: "阿里云百炼/通义千问",
     kind: "openai-compatible",
     baseUrl: "https://dashscope.aliyuncs.com/compatible-mode/v1",
+    baseUrlOptions: [
+      {
+        label: "百炼中国站",
+        url: "https://dashscope.aliyuncs.com/compatible-mode/v1",
+      },
+      {
+        label: "百炼国际站",
+        url: "https://dashscope-intl.aliyuncs.com/compatible-mode/v1",
+      },
+    ],
     model: "qwen-plus",
     modelOptions: [
       "qwen-plus",
@@ -135,14 +147,67 @@ const providerPresets: Array<
     needsApiKey: true,
   },
   {
+    id: "deepseek",
+    label: "DeepSeek",
+    kind: "openai-compatible",
+    baseUrl: "https://api.deepseek.com/v1",
+    baseUrlOptions: [
+      { label: "DeepSeek 官方 API", url: "https://api.deepseek.com/v1" },
+    ],
+    model: "deepseek-chat",
+    modelOptions: ["deepseek-chat", "deepseek-reasoner"],
+    jsonMode: false,
+    needsApiKey: true,
+  },
+  {
+    id: "custom",
+    label: "自定义 / 中转服务",
+    kind: "openai-compatible",
+    baseUrl: "",
+    baseUrlOptions: [
+      { label: "new-api 中转", url: "https://new-api.rugao.me/v1" },
+      { label: "OpenAI 官方", url: "https://api.openai.com/v1" },
+    ],
+    model: "",
+    modelOptions: ["deepseek-v4-flash"],
+    jsonMode: false,
+    needsApiKey: true,
+  },
+  {
     id: "ollama",
     label: "Ollama 本地模型",
     kind: "openai-compatible",
     baseUrl: "http://localhost:11434/v1",
+    baseUrlOptions: [
+      { label: "本机 Ollama", url: "http://localhost:11434/v1" },
+    ],
     model: "qwen2.5:7b",
     modelOptions: ["qwen2.5:7b", "qwen3:8b", "llama3.1:8b"],
     jsonMode: false,
     needsApiKey: false,
+  },
+  {
+    id: "mock",
+    label: "本地演示",
+    kind: "mock",
+    baseUrl: "",
+    model: "",
+    modelOptions: [],
+    jsonMode: false,
+    needsApiKey: false,
+  },
+  {
+    id: "new-api",
+    label: "new-api（DeepSeek 兼容）",
+    kind: "openai-compatible",
+    baseUrl: "https://new-api.rugao.me/v1",
+    baseUrlOptions: [
+      { label: "内置 new-api", url: "https://new-api.rugao.me/v1" },
+    ],
+    model: "deepseek-v4-flash",
+    modelOptions: ["deepseek-v4-flash"],
+    jsonMode: false,
+    needsApiKey: true,
   },
 ];
 
@@ -211,7 +276,7 @@ export class ModelProviderService {
   private readonly logger = new Logger(ModelProviderService.name);
 
   getPresets() {
-    return providerPresets;
+    return providerPresets.filter((item) => item.id !== "new-api");
   }
 
   async test(provider: ProviderConfigDto) {
@@ -323,6 +388,52 @@ export class ModelProviderService {
     return this.callOpenAICompatible(resolved, messages, options);
   }
 
+  async listModels(provider: ProviderConfigDto) {
+    const resolved = this.resolve(provider);
+    if (resolved.kind === "mock") {
+      return { models: [] };
+    }
+
+    if (!resolved.baseUrl) {
+      throw new BadRequestException(
+        "OpenAI-compatible provider requires baseUrl before listing models.",
+      );
+    }
+
+    await this.assertSafeProviderBaseUrl(resolved);
+
+    const preset = providerPresets.find((item) => item.id === provider.preset);
+    if (preset?.needsApiKey !== false && !resolved.apiKey) {
+      const providerLabel = preset?.label || "OpenAI-compatible provider";
+      throw new BadRequestException(
+        `${providerLabel} requires a user-owned API key before listing models.`,
+      );
+    }
+
+    const response = await this.fetchWithTimeout(
+      `${this.normalizeBaseUrl(resolved.baseUrl)}/models`,
+      {
+        method: "GET",
+        headers: this.buildOpenAICompatibleHeaders(resolved),
+      },
+      TEST_MODE_TIMEOUT_MS,
+    );
+
+    if (!response.ok) {
+      const errorText = await response.text();
+      throw new BadRequestException(
+        `Provider model list failed: ${response.status} ${errorText.slice(
+          0,
+          MAX_ERROR_BODY_LENGTH,
+        )}`,
+      );
+    }
+
+    const payload =
+      (await response.json()) as OpenAICompatibleModelListResponse;
+    return { models: this.extractModelIds(payload) };
+  }
+
   resolve(provider: ProviderConfigDto): ProviderConfigDto {
     if (provider.kind === "mock") {
       return provider;
@@ -404,12 +515,8 @@ export class ModelProviderService {
       body.response_format = { type: "json_object" };
     }
 
-    const headers: Record<string, string> = {
-      "content-type": "application/json",
-    };
-    if (provider.apiKey) {
-      headers.authorization = `Bearer ${provider.apiKey}`;
-    }
+    const headers = this.buildOpenAICompatibleHeaders(provider);
+    headers["content-type"] = "application/json";
 
     const response = await this.fetchWithTimeout(
       url,
@@ -431,7 +538,10 @@ export class ModelProviderService {
     if (!response.ok) {
       const errorText = await response.text();
       throw new BadRequestException(
-        `Provider request failed: ${response.status} ${errorText.slice(0, MAX_ERROR_BODY_LENGTH)}`,
+        `Provider request failed: ${response.status} ${errorText.slice(
+          0,
+          MAX_ERROR_BODY_LENGTH,
+        )}`,
       );
     }
 
@@ -482,6 +592,33 @@ export class ModelProviderService {
 
     return (
       this.lengthRetryMaxOutputTokens(options) > (options.maxOutputTokens ?? 0)
+    );
+  }
+
+  private buildOpenAICompatibleHeaders(provider: ProviderConfigDto) {
+    const headers: Record<string, string> = {};
+    if (provider.apiKey) {
+      headers.authorization = `Bearer ${provider.apiKey}`;
+    }
+
+    return headers;
+  }
+
+  private extractModelIds(payload: OpenAICompatibleModelListResponse) {
+    const rawModels = payload.data ?? payload.models ?? [];
+    const ids = rawModels
+      .map((item) => {
+        if (typeof item === "string") {
+          return item;
+        }
+
+        return item.id || item.name || "";
+      })
+      .map((item) => item.trim())
+      .filter(Boolean);
+
+    return Array.from(new Set(ids)).sort((left, right) =>
+      left.localeCompare(right),
     );
   }
 
@@ -619,7 +756,9 @@ export class ModelProviderService {
     const finishReason = choice.finish_reason
       ? ` finish_reason=${choice.finish_reason}`
       : "";
-    return `Provider response did not include message content.${finishReason} choice_keys=${choiceKeys.join(",") || "none"} message_keys=${messageKeys.join(",") || "none"}${refusal}`;
+    return `Provider response did not include message content.${finishReason} choice_keys=${
+      choiceKeys.join(",") || "none"
+    } message_keys=${messageKeys.join(",") || "none"}${refusal}`;
   }
 
   private describeLengthTruncatedProviderContent(
@@ -628,7 +767,9 @@ export class ModelProviderService {
   ) {
     const retryMax = this.lengthRetryMaxOutputTokens(options);
     const requested = options.maxOutputTokens ?? "default";
-    return `模型输出被截断，Provider 没有返回完整可用正文。finish_reason=length requested_max_tokens=${requested} retry_max_tokens=${retryMax}。请换用更大输出额度/非推理模型，或缩短待分析文本后重试。${this.describeProviderShape(choice)}`;
+    return `模型输出被截断，Provider 没有返回完整可用正文。finish_reason=length requested_max_tokens=${requested} retry_max_tokens=${retryMax}。请换用更大输出额度/非推理模型，或缩短待分析文本后重试。${this.describeProviderShape(
+      choice,
+    )}`;
   }
 
   private describeProviderShape(
@@ -640,7 +781,9 @@ export class ModelProviderService {
 
     const messageKeys = choice.message ? Object.keys(choice.message) : [];
     const choiceKeys = Object.keys(choice);
-    return ` choice_keys=${choiceKeys.join(",") || "none"} message_keys=${messageKeys.join(",") || "none"}`;
+    return ` choice_keys=${choiceKeys.join(",") || "none"} message_keys=${
+      messageKeys.join(",") || "none"
+    }`;
   }
 
   private shouldUseJsonSchema(provider: ProviderConfigDto) {
@@ -703,7 +846,10 @@ export class ModelProviderService {
     if (!submitResponse.ok) {
       const errorText = await submitResponse.text();
       throw new BadRequestException(
-        `免费共享算力暂时不可用：${submitResponse.status} ${errorText.slice(0, 300)}`,
+        `免费共享算力暂时不可用：${submitResponse.status} ${errorText.slice(
+          0,
+          300,
+        )}`,
       );
     }
 
@@ -736,7 +882,10 @@ export class ModelProviderService {
       if (!statusResponse.ok) {
         const errorText = await statusResponse.text();
         throw new BadRequestException(
-          `免费共享算力查询失败：${statusResponse.status} ${errorText.slice(0, 300)}`,
+          `免费共享算力查询失败：${statusResponse.status} ${errorText.slice(
+            0,
+            300,
+          )}`,
         );
       }
 
@@ -769,7 +918,9 @@ export class ModelProviderService {
     return messages
       .map(
         (message) =>
-          `${message.role === "system" ? "[System]" : "[User]"}\n${message.content}`,
+          `${message.role === "system" ? "[System]" : "[User]"}\n${
+            message.content
+          }`,
       )
       .join("\n\n");
   }
@@ -835,7 +986,9 @@ export class ModelProviderService {
       if (error instanceof Error && error.name === "AbortError") {
         const hint =
           timeoutOverrideMs !== undefined
-            ? `连接测试在 ${Math.round(timeoutMs / 1000)} 秒内无响应：检查 baseUrl 是否能正常访问，或换一个更快的 provider。`
+            ? `连接测试在 ${Math.round(
+                timeoutMs / 1000,
+              )} 秒内无响应：检查 baseUrl 是否能正常访问，或换一个更快的 provider。`
             : "Provider request timed out. Retry later, switch to a faster provider, or raise PROVIDER_REQUEST_TIMEOUT_MS.";
         throw new BadRequestException(hint);
       }

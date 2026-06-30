@@ -216,7 +216,7 @@ The app provides public/shared model entry points by default and also supports B
 
 For a quick product trial, start with [Try It In 3 Minutes](#try-it-in-3-minutes). This section is for developers and users who need startup options.
 
-`scripts/start-local.cmd` runs environment checks before startup: Node.js / pnpm validation, guided dependency installation, missing `pnpm install`, healthy service reuse, nearby port search, and API/Web logs under `.local/run-logs`.
+`scripts/start-local.cmd` runs environment checks before startup: Node.js / pnpm validation, normal pnpm install when dependency links are supported, a copied local-package fallback when the current drive cannot create dependency links, one clean retry when generated `node_modules` links are normally corrupted, automatic restart of this project's API/Web services, nearby port search when another service owns a port, and API/Web logs under `.local/run-logs`.
 
 If the shared model path is unavailable or slow, switch to your own model provider in "AI Settings".
 
@@ -272,7 +272,7 @@ Common startup commands:
 scripts/start-local.cmd
 scripts/start-local.cmd -a
 pnpm run start:local -- -NoBrowser
-pnpm run start:local -- -Kill
+pnpm run start:local -- -Reuse
 pnpm run start:local -- -WebPort 3100 -ApiPort 3101
 ```
 

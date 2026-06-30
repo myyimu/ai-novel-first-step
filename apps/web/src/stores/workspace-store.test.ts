@@ -316,4 +316,82 @@ describe("workspace store persistence", () => {
 		expect(merged.bookJob?.id).toBe("job-2");
 		expect(merged.bookFile).toBeNull();
 	});
+
+	it("migrates older mock provider settings into the mock preset", () => {
+		const merged = mergeWorkspaceState(
+			{
+				provider: {
+					preset: "custom",
+					kind: "mock",
+					baseUrl: "https://unused.example.com/v1",
+					apiKey: "sk-unused",
+					model: "unused-model",
+					temperature: 0.2,
+					jsonMode: true,
+				},
+			},
+			createState() as WorkspaceStore,
+		);
+
+		expect(merged.provider).toMatchObject({
+			preset: "mock",
+			kind: "mock",
+			baseUrl: "",
+			apiKey: "",
+			model: "",
+			jsonMode: false,
+		});
+	});
+
+	it("migrates the legacy new-api preset into custom provider settings", () => {
+		const merged = mergeWorkspaceState(
+			{
+				provider: {
+					preset: "new-api",
+					kind: "openai-compatible",
+					baseUrl: "",
+					apiKey: "sk-test",
+					model: "",
+					temperature: 0.2,
+					jsonMode: false,
+				},
+			},
+			createState() as WorkspaceStore,
+		);
+
+		expect(merged.provider).toMatchObject({
+			preset: "custom",
+			kind: "openai-compatible",
+			baseUrl: "https://new-api.rugao.me/v1",
+			apiKey: "sk-test",
+			model: "deepseek-v4-flash",
+		});
+	});
+
+	it("keeps only the latest ten provider history entries", () => {
+		const history = Array.from({ length: 12 }, (_, index) => ({
+			id: `history-${index}`,
+			createdAt: new Date(Date.UTC(2026, 5, 1, 0, index, 0)).toISOString(),
+			title: `配置 ${index}`,
+			provider: {
+				preset: "deepseek" as const,
+				kind: "openai-compatible" as const,
+				baseUrl: "https://api.deepseek.com/v1",
+				apiKey: `sk-${index}`,
+				model: "deepseek-chat",
+				temperature: 0.2,
+				jsonMode: false,
+			},
+		}));
+
+		const partialized = partializeWorkspaceState(
+			createState({
+				providerConfigHistory: history,
+			}),
+		);
+
+		expect(partialized.providerConfigHistory).toHaveLength(10);
+		expect(partialized.providerConfigHistory[0]?.id).toBe("history-11");
+		expect(partialized.providerConfigHistory.at(-1)?.id).toBe("history-2");
+	});
 });

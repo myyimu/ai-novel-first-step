@@ -17,17 +17,15 @@ Recommended commands:
 ```powershell
 scripts/start-local.cmd
 scripts/start-local.cmd -a
-scripts/restart-local.cmd
 scripts/reset-local.cmd
 pnpm run start:local
 ```
 
 推荐使用以上任一入口。
 
-- `scripts/start-local.cmd`: beginner-friendly entry, suitable for double-click or direct execution. It reuses existing project services when possible; use `--kill` to force a restart.
+- `scripts/start-local.cmd`: beginner-friendly entry, suitable for double-click or direct execution. It restarts existing project services automatically, so you do not need to kill ports manually.
 - `scripts/start-local.cmd -a`: auto-install mode, skips confirmation prompts when dependencies are missing, and still restarts this project's services.
-- `scripts/restart-local.cmd`: explicit restart command, equivalent to `.cmd --kill`.
-- `scripts/reset-local.cmd`: explicit reset command, equivalent to `.cmd --kill --reset-pglite`.
+- `scripts/reset-local.cmd`: reset command, equivalent to `.cmd -Kill -ResetPglite`.
 - `pnpm run start:local`: starts the same PowerShell flow from the workspace root.
 
 - `scripts/start-local.cmd`：适合双击或直接执行，最适合普通用户；重复运行会关闭旧的 API/Web 黑窗口并重启本项目服务。
@@ -44,13 +42,16 @@ Before opening the API and Web windows, the startup flow now does the following:
 4. If needed, try to install Node.js through `winget`, `Chocolatey`, or `nvm-windows`.
 5. Ensure `pnpm` is available, preferring `corepack` and falling back to `npm install -g`.
 6. Check whether workspace dependencies are installed.
-7. If dependencies are missing, run `pnpm install` from the workspace root.
-8. Serialize repeated launcher runs so two double-clicks do not start competing API/Web processes.
-9. Restart existing project services when using the `.cmd` entry, closing the old console windows first and waiting for old ports to be released; reuse is reserved for the PowerShell entry without `-Kill`.
-10. If default ports are still occupied by other services, search nearby ports.
-11. Start the API and Web dev servers in separate PowerShell windows.
-12. Write runtime logs to `.local/run-logs`.
-13. Open the Web URL automatically unless `-NoBrowser` is used.
+7. If dependencies are missing, check whether the current drive/session supports dependency links.
+8. If symlink permission is missing on a link-capable drive, relaunch the same startup flow in an Administrator PowerShell window.
+9. If the drive does not support links, use a copied local-package fallback after pnpm installs third-party dependencies.
+10. If install fails because generated dependency links are normally corrupted, remove workspace `node_modules` directories and retry once.
+11. Serialize repeated launcher runs so two double-clicks do not start competing API/Web processes.
+12. Restart existing project services by default, closing the old console windows first and waiting for old ports to be released; pass `-Reuse` when you intentionally want to keep healthy existing services.
+13. If default ports are still occupied by other services, search nearby ports.
+14. Start the API and Web dev servers in separate PowerShell windows.
+15. Write runtime logs to `.local/run-logs`.
+16. Open the Web URL automatically unless `-NoBrowser` is used.
 
 在打开 API 和 Web 窗口之前，脚本现在会按下面顺序执行：
 
@@ -60,13 +61,16 @@ Before opening the API and Web windows, the startup flow now does the following:
 4. 如果没有，再尝试通过 `winget`、`Chocolatey` 或 `nvm-windows` 安装 Node.js。
 5. 确保 `pnpm` 可用，优先使用 `corepack`，失败再回退到 `npm install -g`。
 6. 检查工作区依赖是否已安装。
-7. 如果依赖缺失，在工作区根目录自动执行 `pnpm install`。
-8. 对重复启动做串行化处理，避免连续双击时两个启动器同时抢 API/Web 端口。
-9. 使用 `.cmd` 入口时会先关闭旧黑窗口、等待旧端口释放，再重启本项目服务；不带 `-Kill` 的 PowerShell 入口才会优先复用。
-10. 如果默认端口仍然被其他服务占用，自动尝试附近端口。
-11. 最后分别打开 API 和 Web 的 PowerShell 开发窗口。
-12. 把运行日志写入 `.local/run-logs`。
-13. 除非使用 `-NoBrowser`，否则启动后自动打开 Web 页面。
+7. 如果依赖缺失，先检查当前盘符/会话是否支持依赖链接。
+8. 如果盘符支持链接但当前会话缺少 symlink 权限，自动弹出管理员 PowerShell 继续同一套启动流程。
+9. 如果当前盘符不支持链接，在 pnpm 安装第三方依赖后使用本地包复制 fallback。
+10. 如果安装失败是普通生成依赖链接损坏，清理工作区 `node_modules` 后自动重试一次。
+11. 对重复启动做串行化处理，避免连续双击时两个启动器同时抢 API/Web 端口。
+12. 默认会先关闭旧黑窗口、等待旧端口释放，再重启本项目服务；只有显式传 `-Reuse` 时才复用健康服务。
+13. 如果默认端口仍然被其他服务占用，自动尝试附近端口。
+14. 最后分别打开 API 和 Web 的 PowerShell 开发窗口。
+15. 把运行日志写入 `.local/run-logs`。
+16. 除非使用 `-NoBrowser`，否则启动后自动打开 Web 页面。
 
 ## Arguments / 参数
 
@@ -76,7 +80,6 @@ The beginner-friendly `.cmd` entry supports:
 scripts/start-local.cmd
 scripts/start-local.cmd -a
 scripts/start-local.cmd --auto-install
-scripts/restart-local.cmd
 scripts/reset-local.cmd
 ```
 
@@ -84,13 +87,14 @@ The PowerShell entry is better when you need startup options:
 
 ```powershell
 pnpm run start:local -- -NoBrowser
-pnpm run start:local -- -Kill
+pnpm run start:local -- -Reuse
 pnpm run start:local -- -WebPort 3100 -ApiPort 3101
 pnpm run start:local -- -PortSearchLimit 30
 ```
 
 - `-NoBrowser`: start services without opening the browser.
-- `-Kill`: restart existing project-owned API/Web processes instead of reusing them.
+- `-Kill`: restart existing project-owned API/Web processes. This is now the default.
+- `-Reuse`: reuse healthy existing project-owned API/Web services instead of restarting them.
 - `-ResetPglite`: delete `.local/pglite-runtime` before startup and recreate it (for corrupted local DB/runtime recovery).
 - `-WebPort`: preferred Web port, default `3000`.
 - `-ApiPort`: preferred API port, default `3001`.
@@ -102,7 +106,6 @@ pnpm run start:local -- -PortSearchLimit 30
 scripts/start-local.cmd
 scripts/start-local.cmd -a
 scripts/start-local.cmd --auto-install
-scripts/restart-local.cmd
 scripts/reset-local.cmd
 ```
 
@@ -110,13 +113,14 @@ scripts/reset-local.cmd
 
 ```powershell
 pnpm run start:local -- -NoBrowser
-pnpm run start:local -- -Kill
+pnpm run start:local -- -Reuse
 pnpm run start:local -- -WebPort 3100 -ApiPort 3101
 pnpm run start:local -- -PortSearchLimit 30
 ```
 
 - `-NoBrowser`：只启动服务，不自动打开浏览器。
-- `-Kill`：重启本项目已有的 API/Web 进程，而不是复用。
+- `-Kill`：重启本项目已有的 API/Web 进程；现在这是默认行为。
+- `-Reuse`：复用健康的本项目 API/Web 服务，而不是重启。
 - `-WebPort`：Web 优先端口，默认 `3000`。
 - `-ApiPort`：API 优先端口，默认 `3001`。
 - `-PortSearchLimit`：首选端口之后继续尝试的范围，默认 `20`。

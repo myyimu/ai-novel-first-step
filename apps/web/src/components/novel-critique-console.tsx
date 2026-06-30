@@ -23,7 +23,7 @@ import { OverviewView } from "@/components/workspace/overview-view";
 import { RevisionHistoryView } from "@/components/workspace/revision-history-view";
 import { StarterView } from "@/components/workspace/starter-view";
 import { WorkspaceShell } from "@/components/workspace/workspace-shell";
-import { providerPresets } from "@/lib/provider-presets";
+import { providerPresetOptions, providerPresets } from "@/lib/provider-presets";
 import { useWorkspaceHandlers, type LoadingState } from "@/hooks/use-workspace-handlers";
 import {
 	getBookJobProgressDetail,
@@ -34,7 +34,6 @@ import { type WorkspaceView } from "@/lib/workspace-routes";
 import {
 	type BookAnalysisJob,
 	type BookUploadPreview,
-	type ProviderKind,
 	type ProviderPresetId,
 } from "@/stores/workspace-store";
 
@@ -654,7 +653,7 @@ export function NovelCritiqueConsole({ view = "overview" }: { view?: WorkspaceVi
 						Key 不会上传到后端保存。
 					</p>
 					<div className="mt-3 flex flex-wrap items-center gap-2 text-xs text-muted-foreground">
-						<span>本机默认：{providerPresets[h.provider.preset].label}</span>
+						<span>当前模型服务：{providerPresets[h.provider.preset].label}</span>
 						<span>{h.provider.model || "未指定模型"}</span>
 						<Button
 							type="button"
@@ -676,28 +675,6 @@ export function NovelCritiqueConsole({ view = "overview" }: { view?: WorkspaceVi
 
 					<div className="mt-5 grid gap-4 md:grid-cols-3">
 						<div className="space-y-2">
-							<Label htmlFor="provider-kind">使用方式</Label>
-							<select
-								id="provider-kind"
-								className="h-10 w-full rounded-md border border-input bg-background px-3 text-sm"
-								value={h.provider.kind}
-								onChange={(event) => {
-									const nextKind = event.target.value as ProviderKind;
-									h.setProvider((current) => ({
-										...current,
-										kind: nextKind,
-										preset:
-											current.preset === "shared-gpu" && nextKind === "mock"
-												? "custom"
-												: current.preset,
-									}));
-								}}
-							>
-								<option value="mock">本地演示</option>
-								<option value="openai-compatible">共享站/付费模型</option>
-							</select>
-						</div>
-						<div className="space-y-2">
 							<Label htmlFor="provider-preset">模型服务</Label>
 							<select
 								id="provider-preset"
@@ -707,106 +684,223 @@ export function NovelCritiqueConsole({ view = "overview" }: { view?: WorkspaceVi
 									h.applyProviderPreset(event.target.value as ProviderPresetId)
 								}
 							>
-								{Object.entries(providerPresets).map(([id, preset]) => (
+								{providerPresetOptions.map(({ id, preset }) => (
 									<option key={id} value={id}>
 										{preset.label}
 									</option>
 								))}
 							</select>
 						</div>
-						<div className="space-y-2">
-							<div className="flex items-center gap-1">
-								<Label htmlFor="provider-model">模型（Model）</Label>
-								<FieldHelp text="不同模型擅长的内容、速度和稳定性不同。共享站的模型由服务端配置；付费模型会使用这里选择或填写的 Model。" />
+						{h.provider.kind === "mock" ? (
+							<div className="md:col-span-2 min-h-10 rounded-md border border-border bg-muted px-3 py-2 text-sm leading-6 text-muted-foreground">
+								<p className="font-medium text-foreground">
+									本地演示不需要模型参数
+								</p>
+								<p>
+									测试连接会直接通过；诊断结果使用内置演示逻辑，不代表真实模型判断。
+								</p>
 							</div>
-							{h.providerModelOptions.length ? (
-								<select
-									id="provider-model-option"
-									aria-label="选择预设模型"
-									className="h-10 w-full rounded-md border border-input bg-background px-3 text-sm"
-									value={h.selectedModelOption}
-									onChange={(event) => {
-										if (event.target.value === "__custom__") {
-											return;
-										}
-										h.setProvider((current) => ({
-											...current,
-											model: event.target.value,
-										}));
-									}}
-								>
-									{h.providerModelOptions.map((model) => (
-										<option key={model} value={model}>
-											{model}
-										</option>
-									))}
-									<option value="__custom__">手动输入其他 Model</option>
-								</select>
-							) : null}
-							<Input
-								id="provider-model"
-								value={h.provider.model}
-								onChange={(event) =>
-									h.setProvider((current) => ({
-										...current,
-										model: event.target.value,
-									}))
-								}
-								placeholder={
-									h.isBackendFreeProvider
-										? "由共享站服务端配置决定"
-										: "例如 qwen-plus-latest"
-								}
-								disabled={h.provider.preset === "shared-gpu"}
-							/>
-						</div>
-						<div className="space-y-2">
-							<Label htmlFor="provider-base-url">Base URL（高级）</Label>
-							<Input
-								id="provider-base-url"
-								value={h.provider.baseUrl}
-								onChange={(event) =>
-									h.setProvider((current) => ({
-										...current,
-										preset: "custom",
-										baseUrl: event.target.value,
-									}))
-								}
-								placeholder={
-									h.isBackendFreeProvider ? "由共享站服务端配置提供" : undefined
-								}
-								disabled={h.provider.preset === "shared-gpu"}
-							/>
-						</div>
-						<div className="space-y-2">
-							<Label htmlFor="provider-api-key">API Key（高级）</Label>
-							{h.isBackendFreeProvider ? (
-								<div className="min-h-10 rounded-md border border-border bg-muted px-3 py-2 text-sm leading-6 text-muted-foreground">
-									<p className="font-medium text-foreground">无需填写</p>
-									<p>
-										共享站由服务器统一连接。你只需要测试是否可用；如果不可用，可以切换到付费模型并填写自己的
-										API Key。
-									</p>
+						) : (
+							<>
+								<div className="space-y-2">
+									<div className="flex items-center gap-1">
+										<Label htmlFor="provider-model">模型（Model）</Label>
+										<FieldHelp text="不同模型擅长的内容、速度和稳定性不同。共享站的模型由服务端配置；付费模型会使用这里选择或填写的 Model。" />
+									</div>
+									<div className="flex gap-2">
+										<Input
+											id="provider-model"
+											list="provider-model-options"
+											value={h.provider.model}
+											onChange={(event) => {
+												h.setProvider((current) => ({
+													...current,
+													model: event.target.value,
+												}));
+												h.setProviderModelSearch(event.target.value);
+											}}
+											placeholder={
+												h.isBackendFreeProvider
+													? "由共享站服务端配置决定"
+													: "输入或搜索模型，例如 qwen-plus-latest"
+											}
+											disabled={h.provider.preset === "shared-gpu"}
+										/>
+										{!h.isBackendFreeProvider ? (
+											<Button
+												type="button"
+												variant="outline"
+												onClick={h.loadProviderModelOptions}
+												disabled={h.providerModelsLoading}
+											>
+												{h.providerModelsLoading ? (
+													<Loader2 className="mr-2 size-4 animate-spin" />
+												) : null}
+												拉取模型
+											</Button>
+										) : null}
+									</div>
+									<datalist id="provider-model-options">
+										{h.filteredProviderModelOptions.map((model) => (
+											<option key={model} value={model} />
+										))}
+									</datalist>
+									{h.providerModelOptions.length ? (
+										<p className="text-xs text-muted-foreground">
+											可选模型 {h.providerModelOptions.length}{" "}
+											个；可直接输入搜索或手动填写其他 Model。
+										</p>
+									) : (
+										<p className="text-xs text-muted-foreground">
+											可先拉取模型列表；若厂商不支持 /models，也可以手动填写
+											Model。
+										</p>
+									)}
 								</div>
-							) : (
-								<Input
-									id="provider-api-key"
-									type="password"
-									value={h.provider.apiKey}
-									onChange={(event) =>
-										h.setProvider((current) => ({
-											...current,
-											apiKey: event.target.value,
-										}))
-									}
-									placeholder={
-										providerPresets[h.provider.preset].needsApiKey
-											? "填写你的模型服务 API Key，只保存在本机浏览器"
-											: "本地模型可留空"
-									}
-								/>
-							)}
+								<div className="space-y-2">
+									<Label htmlFor="provider-base-url">Base URL（高级）</Label>
+									{h.providerBaseUrlOptions.length ? (
+										<select
+											id="provider-base-url-option"
+											aria-label="选择推荐 Base URL"
+											className="h-10 w-full rounded-md border border-input bg-background px-3 text-sm"
+											value={h.selectedBaseUrlOption}
+											onChange={(event) => {
+												if (event.target.value === "__custom__") {
+													return;
+												}
+												h.setProvider((current) => ({
+													...current,
+													baseUrl: event.target.value,
+												}));
+												h.setProviderModelSearch("");
+											}}
+											disabled={h.provider.preset === "shared-gpu"}
+										>
+											{h.providerBaseUrlOptions.map((option) => (
+												<option key={option.url} value={option.url}>
+													{option.label}
+												</option>
+											))}
+											<option value="__custom__">
+												手动填写其他 Base URL
+											</option>
+										</select>
+									) : null}
+									<Input
+										id="provider-base-url"
+										value={h.provider.baseUrl}
+										onChange={(event) =>
+											h.setProvider((current) => ({
+												...current,
+												baseUrl: event.target.value,
+											}))
+										}
+										placeholder={
+											h.isBackendFreeProvider
+												? "由共享站服务端配置提供"
+												: "例如 https://dashscope.aliyuncs.com/compatible-mode/v1"
+										}
+										disabled={h.provider.preset === "shared-gpu"}
+									/>
+								</div>
+								<div className="space-y-2">
+									<Label htmlFor="provider-api-key">API Key（高级）</Label>
+									{h.isBackendFreeProvider ? (
+										<div className="min-h-10 rounded-md border border-border bg-muted px-3 py-2 text-sm leading-6 text-muted-foreground">
+											<p className="font-medium text-foreground">无需填写</p>
+											<p>
+												共享站由服务器统一连接。你只需要测试是否可用；如果不可用，可以切换到付费模型并填写自己的
+												API Key。
+											</p>
+										</div>
+									) : (
+										<Input
+											id="provider-api-key"
+											type="password"
+											value={h.provider.apiKey}
+											onChange={(event) =>
+												h.setProvider((current) => ({
+													...current,
+													apiKey: event.target.value,
+												}))
+											}
+											placeholder={
+												providerPresets[h.provider.preset].needsApiKey
+													? "填写你的模型服务 API Key，只保存在本机浏览器"
+													: "本地模型可留空"
+											}
+										/>
+									)}
+								</div>
+							</>
+						)}
+					</div>
+					<div className="mt-6 border-t border-border pt-5">
+						<div className="flex items-center justify-between gap-3">
+							<div>
+								<h3 className="text-sm font-semibold">AI 设置历史</h3>
+								<p className="mt-1 text-xs text-muted-foreground">
+									只保存测试成功的最近 10 条配置。
+								</p>
+							</div>
+							{h.providerConfigHistory.length ? (
+								<Button
+									type="button"
+									variant="outline"
+									size="sm"
+									onClick={h.clearProviderConfigHistory}
+								>
+									清空
+								</Button>
+							) : null}
 						</div>
+						{h.providerConfigHistory.length ? (
+							<div className="mt-3 divide-y divide-border rounded-md border border-border">
+								{h.providerConfigHistory.map((item) => (
+									<div
+										key={item.id}
+										className="flex flex-col gap-3 p-3 md:flex-row md:items-center md:justify-between"
+									>
+										<div className="min-w-0">
+											<p className="truncate text-sm font-medium">
+												{item.title}
+											</p>
+											<p className="mt-1 text-xs text-muted-foreground">
+												{new Date(item.createdAt).toLocaleString()}
+											</p>
+										</div>
+										<div className="flex shrink-0 gap-2">
+											<Button
+												type="button"
+												variant="outline"
+												size="sm"
+												onClick={() =>
+													h.applyProviderConfigHistory(item.id)
+												}
+											>
+												复用
+											</Button>
+											<Button
+												type="button"
+												variant="outline"
+												size="sm"
+												onClick={() =>
+													h.deleteProviderConfigHistory(item.id)
+												}
+											>
+												<Trash2 className="mr-2 size-4" />
+												删除
+											</Button>
+										</div>
+									</div>
+								))}
+							</div>
+						) : (
+							<p className="mt-3 rounded-md border border-dashed border-border px-3 py-4 text-sm text-muted-foreground">
+								暂无成功测试过的 AI 设置。
+							</p>
+						)}
 					</div>
 				</section>
 			) : null}

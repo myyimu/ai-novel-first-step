@@ -3,9 +3,13 @@ param(
 	[int]$ApiPort = 3001,
 	[int]$PortSearchLimit = 20,
 	[switch]$NoBrowser,
+	[Alias("a")]
+	[switch]$AutoInstall,
 	[switch]$Kill,
+	[switch]$Reuse,
 	[switch]$ResetPglite,
-	[switch]$RecoveryRetry
+	[switch]$RecoveryRetry,
+	[switch]$ElevatedInstall
 )
 
 $ErrorActionPreference = "Stop"
@@ -24,6 +28,19 @@ $ApiDir = Join-Path $RootPath "services/api"
 $WebDir = Join-Path $RootPath "apps/web"
 $LogsDir = Join-Path $RootPath ".local/run-logs"
 $PgliteDir = Join-Path $RootPath ".local/pglite-runtime"
+$script:UsePortablePnpmInstall = $false
+$OriginalBoundParameters = @{}
+foreach ($key in $PSBoundParameters.Keys) {
+	$OriginalBoundParameters[$key] = $PSBoundParameters[$key]
+}
+
+if ($Reuse -and $Kill) {
+	Write-Error "Use either -Reuse or -Kill, not both."
+}
+
+if (-not $Reuse) {
+	$Kill = $true
+}
 
 function Test-PathExists($Path) {
 	return Test-Path -LiteralPath $Path
@@ -52,13 +69,19 @@ if (-not $script:StartLocalMutexAcquired) {
 	Write-Error "Another start-local launcher is still preparing services. Close it or retry after it finishes."
 }
 
-trap {
+function Release-StartLocalMutex {
 	if ($script:StartLocalMutexAcquired) {
 		$script:StartLocalMutex.ReleaseMutex() | Out-Null
+		$script:StartLocalMutexAcquired = $false
 	}
 	if ($script:StartLocalMutex) {
 		$script:StartLocalMutex.Dispose()
+		$script:StartLocalMutex = $null
 	}
+}
+
+trap {
+	Release-StartLocalMutex
 	break
 }
 
@@ -74,11 +97,12 @@ function Test-Command($Name) {
 	return [bool](Get-Command $Name -ErrorAction SilentlyContinue)
 }
 
-function Get-PnpmCommand {
-	if (Test-Command "pnpm") {
-		return "pnpm"
-	}
+function Test-AdminPrivilege {
+	$currentUser = [Security.Principal.WindowsPrincipal]::new([Security.Principal.WindowsIdentity]::GetCurrent())
+	return $currentUser.IsInRole([Security.Principal.WindowsBuiltInRole]::Administrator)
+}
 
+function Get-PnpmCommand {
 	if (Test-Command "corepack") {
 		try {
 			$null = corepack pnpm --version 2>$null
@@ -89,6 +113,10 @@ function Get-PnpmCommand {
 		catch {
 			return $null
 		}
+	}
+
+	if (Test-Command "pnpm") {
+		return "pnpm"
 	}
 
 	return $null
@@ -104,7 +132,9 @@ function Test-WorkspaceDependenciesInstalled {
 
 	$checks = @(
 		@{ Dir = $ApiDir; Command = "$script:PnpmCommand exec nest --version" },
-		@{ Dir = $WebDir; Command = "$script:PnpmCommand exec next --version" }
+		@{ Dir = $WebDir; Command = "$script:PnpmCommand exec next --version" },
+		@{ Dir = $ApiDir; Command = 'if (Test-Path -LiteralPath ".\node_modules\@ai-novel-diagnosis\ai-core\package.json") { exit 0 } else { exit 1 }' },
+		@{ Dir = $WebDir; Command = 'if (Test-Path -LiteralPath ".\node_modules\@ai-novel-diagnosis\ai-core\package.json") { exit 0 } else { exit 1 }' }
 	)
 
 	foreach ($check in $checks) {
@@ -160,6 +190,205 @@ function Test-WorkspaceDependenciesInstalled {
 	}
 }
 
+function Invoke-PnpmInstall {
+	Push-Location $RootPath
+	try {
+		$installArgs = @("install")
+		if ($script:UsePortablePnpmInstall) {
+			$installArgs += @(
+				"--config.node-linker=hoisted",
+				"--config.package-import-method=copy",
+				"--config.link-workspace-packages=false"
+			)
+		}
+
+		if ($script:PnpmCommand -eq "pnpm") {
+			& pnpm @installArgs
+		}
+		else {
+			& corepack pnpm @installArgs
+		}
+
+		return $LASTEXITCODE
+	}
+	finally {
+		Pop-Location
+	}
+}
+
+function Test-DirectorySymlinkSupported {
+	$tempRoot = Join-Path ([System.IO.Path]::GetTempPath()) ("ai-novel-symlink-test-" + [System.Guid]::NewGuid().ToString("N"))
+	try {
+		New-Item -ItemType Directory -Force -Path (Join-Path $tempRoot "target") | Out-Null
+		$script = "const fs=require('fs'); const path=require('path'); const root=process.argv[1]; fs.symlinkSync(path.join(root,'target'), path.join(root,'link'));"
+		& node -e $script $tempRoot *> $null
+		return $LASTEXITCODE -eq 0
+	}
+	catch {
+		return $false
+	}
+	finally {
+		if (Test-PathExists $tempRoot) {
+			Remove-Item -LiteralPath $tempRoot -Recurse -Force -ErrorAction SilentlyContinue
+		}
+	}
+}
+
+function Test-DirectoryJunctionSupported {
+	$tempRoot = Join-Path $LogsDir ("junction-test-" + [System.Guid]::NewGuid().ToString("N"))
+	try {
+		$target = Join-Path $tempRoot "target"
+		$link = Join-Path $tempRoot "link"
+		New-Item -ItemType Directory -Force -Path $target | Out-Null
+		& cmd.exe /d /c "mklink /J `"$link`" `"$target`"" *> $null
+		return $LASTEXITCODE -eq 0 -and (Test-PathExists $link)
+	}
+	catch {
+		return $false
+	}
+	finally {
+		if (Test-PathExists $tempRoot) {
+			Remove-Item -LiteralPath $tempRoot -Recurse -Force -ErrorAction SilentlyContinue
+		}
+	}
+}
+
+function ConvertTo-StartLocalArgumentList {
+	$args = @("-NoProfile", "-ExecutionPolicy", "Bypass", "-File", $PSCommandPath)
+	$knownSwitches = @("NoBrowser", "AutoInstall", "Kill", "Reuse", "ResetPglite", "RecoveryRetry", "ElevatedInstall")
+
+	foreach ($entry in $OriginalBoundParameters.GetEnumerator()) {
+		if ($entry.Key -eq "ElevatedInstall") {
+			continue
+		}
+
+		$args += "-$($entry.Key)"
+		if (-not $knownSwitches.Contains($entry.Key)) {
+			$args += [string]$entry.Value
+		}
+	}
+
+	$args += "-ElevatedInstall"
+	return $args
+}
+
+function Start-ElevatedStartLocal {
+	Write-Host "Current Windows session cannot create directory symlinks." -ForegroundColor Yellow
+	Write-Host "Opening an Administrator PowerShell window to finish pnpm install and startup..." -ForegroundColor Yellow
+	Release-StartLocalMutex
+	$process = Start-Process -FilePath "powershell.exe" `
+		-ArgumentList (ConvertTo-StartLocalArgumentList) `
+		-WorkingDirectory $RootPath `
+		-Verb RunAs `
+		-Wait `
+		-PassThru
+	exit $process.ExitCode
+}
+
+function Build-AiCorePackage {
+	if (Test-PathExists (Join-Path $RootPath "packages/ai-core/dist/index.mjs")) {
+		return $true
+	}
+
+	Push-Location (Join-Path $RootPath "packages/ai-core")
+	try {
+		if ($script:PnpmCommand -eq "pnpm") {
+			& pnpm run build
+		}
+		else {
+			& corepack pnpm run build
+		}
+		return $LASTEXITCODE -eq 0
+	}
+	finally {
+		Pop-Location
+	}
+}
+
+function Remove-OrQuarantineGeneratedDirectory($Path) {
+	$resolvedPath = (Resolve-Path -LiteralPath $Path).Path
+	if (-not ($resolvedPath -eq $RootPath -or $resolvedPath.StartsWith($RootPath + [System.IO.Path]::DirectorySeparatorChar))) {
+		Write-Error "Refusing to remove generated directory outside workspace: $resolvedPath"
+	}
+
+	Write-Host "Removing generated dependency directory: $resolvedPath"
+	try {
+		Remove-Item -LiteralPath $resolvedPath -Recurse -Force -ErrorAction Stop
+		return
+	}
+	catch {
+		$parent = Split-Path -Parent $resolvedPath
+		$name = Split-Path -Leaf $resolvedPath
+		$quarantineName = "$name.failed-$(Get-Date -Format 'yyyyMMdd-HHmmss')"
+		Write-Host "Remove failed; renaming to $quarantineName so install can continue." -ForegroundColor Yellow
+		$cmd = "cd /d `"$parent`" && ren `"$name`" `"$quarantineName`""
+		& cmd.exe /d /c $cmd
+		if ($LASTEXITCODE -ne 0 -or (Test-PathExists $resolvedPath)) {
+			Write-Error "Could not remove or rename generated dependency directory: $resolvedPath"
+		}
+	}
+}
+
+function Sync-AiCorePackageCopy($Destination) {
+	$source = Join-Path $RootPath "packages/ai-core"
+	$sourceDist = Join-Path $source "dist"
+	if (-not (Test-PathExists (Join-Path $source "package.json")) -or -not (Test-PathExists $sourceDist)) {
+		return $false
+	}
+
+	$destinationParent = Split-Path -Parent $Destination
+	New-Item -ItemType Directory -Force -Path $destinationParent | Out-Null
+	if (Test-PathExists $Destination) {
+		Remove-OrQuarantineGeneratedDirectory $Destination
+	}
+	New-Item -ItemType Directory -Force -Path $Destination | Out-Null
+
+	foreach ($file in @("package.json", "README.md", "LICENSE")) {
+		$sourceFile = Join-Path $source $file
+		if (Test-PathExists $sourceFile) {
+			Copy-Item -LiteralPath $sourceFile -Destination (Join-Path $Destination $file) -Force
+		}
+	}
+	Copy-Item -LiteralPath $sourceDist -Destination (Join-Path $Destination "dist") -Recurse -Force
+	return Test-PathExists (Join-Path $Destination "package.json")
+}
+
+function Sync-WorkspacePackageCopies {
+	Write-Host "Falling back to copied workspace packages because this drive does not support dependency links." -ForegroundColor Yellow
+	if (-not (Build-AiCorePackage)) {
+		return $false
+	}
+
+	$destinations = @(
+		(Join-Path $ApiDir "node_modules/@ai-novel-diagnosis/ai-core"),
+		(Join-Path $WebDir "node_modules/@ai-novel-diagnosis/ai-core")
+	)
+	foreach ($destination in $destinations) {
+		if (-not (Sync-AiCorePackageCopy $destination)) {
+			return $false
+		}
+	}
+
+	return $true
+}
+
+function Remove-GeneratedNodeModules {
+	$paths = @(
+		(Join-Path $RootPath "node_modules"),
+		(Join-Path $ApiDir "node_modules"),
+		(Join-Path $WebDir "node_modules"),
+		(Join-Path $RootPath "packages/ai-core/node_modules")
+	)
+
+	foreach ($path in ($paths | Sort-Object Length -Descending)) {
+		if (-not (Test-PathExists $path)) {
+			continue
+		}
+
+		Remove-OrQuarantineGeneratedDirectory $path
+	}
+}
+
 function Ensure-WorkspaceDependencies {
 	$dependencyStatus = Test-WorkspaceDependenciesInstalled
 	if ($dependencyStatus.Ok) {
@@ -168,20 +397,53 @@ function Ensure-WorkspaceDependencies {
 	}
 
 	Write-Host "Workspace dependencies missing; running pnpm install..."
-	Push-Location $RootPath
-	try {
-		if ($script:PnpmCommand -eq "pnpm") {
-			& pnpm install
+	$copyFallbackRequired = $false
+	if (-not (Test-DirectorySymlinkSupported)) {
+		$junctionSupported = Test-DirectoryJunctionSupported
+		if ($junctionSupported -and -not $ElevatedInstall -and -not (Test-AdminPrivilege)) {
+			Start-ElevatedStartLocal
 		}
-		else {
-			& corepack pnpm install
+
+		if ($junctionSupported) {
+			Write-Host "This Windows session still cannot create directory symlinks." -ForegroundColor Yellow
+			Write-Host "Fix one of these, then run scripts/start-local.cmd again:" -ForegroundColor Yellow
+			Write-Host "  1. Enable Windows Developer Mode." -ForegroundColor Yellow
+			Write-Host "  2. Or open PowerShell as Administrator and run: corepack pnpm install" -ForegroundColor Yellow
+			Write-Error "Stopped before pnpm install to avoid corrupting node_modules."
 		}
-		if ($LASTEXITCODE -ne 0) {
-			Write-Error "pnpm install failed. Fix dependency installation errors and rerun the script."
-		}
+
+		Write-Host "This drive does not support dependency links; install will use a copy fallback after pnpm finishes." -ForegroundColor Yellow
+		$copyFallbackRequired = $true
+		$script:UsePortablePnpmInstall = $true
 	}
-	finally {
-		Pop-Location
+
+	$installExitCode = Invoke-PnpmInstall
+	if ($installExitCode -ne 0) {
+		if (Sync-WorkspacePackageCopies) {
+			$dependencyStatus = Test-WorkspaceDependenciesInstalled
+			if ($dependencyStatus.Ok) {
+				Write-Host "Workspace dependencies installed with copied local packages"
+				return
+			}
+		}
+
+		if ($copyFallbackRequired) {
+			Write-Error "pnpm install could not finish on this non-linking drive, and the copied package fallback did not produce a complete install."
+		}
+
+		Write-Host "pnpm install failed. Cleaning generated node_modules and retrying once..." -ForegroundColor Yellow
+		Remove-GeneratedNodeModules
+		$installExitCode = Invoke-PnpmInstall
+		if ($installExitCode -ne 0) {
+			if (Sync-WorkspacePackageCopies) {
+				$dependencyStatus = Test-WorkspaceDependenciesInstalled
+				if ($dependencyStatus.Ok) {
+					Write-Host "Workspace dependencies installed with copied local packages"
+					return
+				}
+			}
+			Write-Error "pnpm install failed after a clean retry. Fix dependency installation errors and rerun the script."
+		}
 	}
 
 	$dependencyStatus = Test-WorkspaceDependenciesInstalled
@@ -685,9 +947,4 @@ if (-not $NoBrowser) {
 
 Write-Host "Close the opened API/Web PowerShell windows to stop the dev servers."
 
-if ($script:StartLocalMutexAcquired) {
-	$script:StartLocalMutex.ReleaseMutex() | Out-Null
-}
-if ($script:StartLocalMutex) {
-	$script:StartLocalMutex.Dispose()
-}
+Release-StartLocalMutex

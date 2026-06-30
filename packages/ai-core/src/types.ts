@@ -3,6 +3,7 @@ export type Genre = "xuanhuan" | "urban" | "romance" | "suspense" | "infinite-fl
 export type ProviderKind = "mock" | "openai-compatible";
 
 export type ProviderPresetId =
+  | "mock"
   | "custom"
   | "shared-gpu"
   | "deepseek"
@@ -11,10 +12,16 @@ export type ProviderPresetId =
   | "ollama"
   | "new-api";
 
+export interface ProviderBaseUrlOption {
+  label: string;
+  url: string;
+}
+
 export interface ProviderPreset {
   label: string;
   kind: ProviderKind;
   baseUrl: string;
+  baseUrlOptions?: ProviderBaseUrlOption[];
   model: string;
   modelOptions?: string[];
   jsonMode: boolean;

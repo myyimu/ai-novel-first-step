@@ -49,8 +49,7 @@ export const defaultProvider: ProviderForm = {
 	jsonMode: false,
 };
 
-const PROVIDER_CONFIG_HISTORY_RETENTION_MS = 7 * 24 * 60 * 60 * 1000;
-const PROVIDER_CONFIG_HISTORY_MAX_ENTRIES = 30;
+const PROVIDER_CONFIG_HISTORY_MAX_ENTRIES = 10;
 
 export type ScoreProgressStatus = "pending" | "checking" | "completed" | "failed";
 export type AiSelfTestId =
@@ -1037,10 +1036,7 @@ function toPersistedBookJob(job: BookAnalysisJob | null): BookAnalysisJob | null
 	};
 }
 
-function pruneProviderConfigHistory(
-	rawHistory: unknown,
-	now = Date.now(),
-): ProviderConfigHistoryEntry[] {
+function pruneProviderConfigHistory(rawHistory: unknown): ProviderConfigHistoryEntry[] {
 	if (!Array.isArray(rawHistory)) {
 		return [];
 	}
@@ -1068,10 +1064,7 @@ function pruneProviderConfigHistory(
 			}
 
 			const timestamp = Date.parse(typed.createdAt);
-			return (
-				Number.isFinite(timestamp) &&
-				timestamp >= now - PROVIDER_CONFIG_HISTORY_RETENTION_MS
-			);
+			return Number.isFinite(timestamp);
 		})
 		.sort((a, b) => new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime())
 		.slice(0, PROVIDER_CONFIG_HISTORY_MAX_ENTRIES);
@@ -1117,6 +1110,7 @@ export function mergeWorkspaceState(
 			: {};
 	const persistedProvider = persisted.provider;
 	const allowedPresets: ProviderPresetId[] = [
+		"mock",
 		"custom",
 		"shared-gpu",
 		"deepseek",
@@ -1129,6 +1123,24 @@ export function mergeWorkspaceState(
 		persistedProvider && allowedPresets.includes(persistedProvider.preset)
 			? persistedProvider
 			: currentState.provider;
+	const normalizedProvider =
+		safeProvider.kind === "mock"
+			? {
+					...safeProvider,
+					preset: "mock" as const,
+					baseUrl: "",
+					apiKey: "",
+					model: "",
+					jsonMode: false,
+				}
+			: safeProvider.preset === "new-api"
+				? {
+						...safeProvider,
+						preset: "custom" as const,
+						baseUrl: safeProvider.baseUrl || "https://new-api.rugao.me/v1",
+						model: safeProvider.model || "deepseek-v4-flash",
+					}
+				: safeProvider;
 	const providerConfigHistory = pruneProviderConfigHistory(
 		(persisted as { providerConfigHistory?: unknown }).providerConfigHistory,
 	);
@@ -1148,10 +1160,10 @@ export function mergeWorkspaceState(
 		projects,
 		activeProjectId,
 		providerConfigHistory,
-		provider: safeProvider
+		provider: normalizedProvider
 			? {
 					...currentState.provider,
-					...safeProvider,
+					...normalizedProvider,
 				}
 			: currentState.provider,
 		bookFile: null,

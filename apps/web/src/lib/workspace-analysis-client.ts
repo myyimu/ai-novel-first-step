@@ -95,6 +95,18 @@ export function testProviderConnectionWithTimeout(provider: ProviderForm, timeou
 	);
 }
 
+export function listProviderModels(provider: ProviderForm, timeoutMs?: number) {
+	return postJson<{ models: string[] }>(
+		"/analysis/provider/models",
+		{
+			provider,
+		},
+		{
+			timeoutMs,
+		},
+	);
+}
+
 export function requestReferenceProfile({
 	provider,
 	referenceTitle,

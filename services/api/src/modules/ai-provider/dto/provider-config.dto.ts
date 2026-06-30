@@ -21,6 +21,7 @@ export class ProviderConfigDto {
     description:
       "Provider preset used to prefill base URL and model. User-owned key is still sent per request only.",
     enum: [
+      "mock",
       "custom",
       "shared-gpu",
       "deepseek",
@@ -33,6 +34,7 @@ export class ProviderConfigDto {
   })
   @IsOptional()
   @IsIn([
+    "mock",
     "custom",
     "shared-gpu",
     "deepseek",
@@ -97,6 +99,14 @@ export class ProviderConfigDto {
 }
 
 export class TestProviderDto {
+  @ApiProperty({ type: ProviderConfigDto })
+  @IsNotEmpty()
+  @ValidateNested()
+  @Type(() => ProviderConfigDto)
+  provider!: ProviderConfigDto;
+}
+
+export class ListProviderModelsDto {
   @ApiProperty({ type: ProviderConfigDto })
   @IsNotEmpty()
   @ValidateNested()

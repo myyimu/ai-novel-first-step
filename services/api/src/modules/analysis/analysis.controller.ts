@@ -7,7 +7,10 @@ import { InferReferenceProfileDto } from "./dto/infer-reference-profile.dto";
 import { PreviewAnalysisDto } from "./dto/preview-analysis.dto";
 import { QuickReviewDto } from "./dto/quick-review.dto";
 import { ScoreChapterDto } from "./dto/score-chapter.dto";
-import { TestProviderDto } from "@/modules/ai-provider/dto/provider-config.dto";
+import {
+  ListProviderModelsDto,
+  TestProviderDto,
+} from "@/modules/ai-provider/dto/provider-config.dto";
 
 @ApiTags("analysis")
 @Controller("analysis")
@@ -49,6 +52,14 @@ export class AnalysisController {
   @ApiOperation({ summary: "Test a user supplied model provider" })
   testProvider(@Body() body: TestProviderDto) {
     return this.analysisService.testProvider(body.provider);
+  }
+
+  @Post("provider/models")
+  @HttpCode(200)
+  @Public()
+  @ApiOperation({ summary: "List models from a user supplied model provider" })
+  listProviderModels(@Body() body: ListProviderModelsDto) {
+    return this.analysisService.listProviderModels(body.provider);
   }
 
   @Get("provider/presets")

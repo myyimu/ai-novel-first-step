@@ -1312,6 +1312,10 @@ export class AnalysisService {
     return this.modelProviders.test(provider);
   }
 
+  async listProviderModels(provider: ProviderConfigDto) {
+    return this.modelProviders.listModels(provider);
+  }
+
   getProviderPresets() {
     return this.modelProviders.getPresets();
   }

@@ -19,6 +19,7 @@ import {
 	createBookAnalysisJobFromUpload,
 	deleteBookAnalysisJob,
 	listBookHistory,
+	listProviderModels,
 	readBookAnalysisJob,
 	readResearchLibrary,
 	readWorkspaceAssets,
@@ -356,6 +357,12 @@ export function useWorkspaceHandlers(activeView: WorkspaceView) {
 	const [quickReviewElapsedSeconds, setQuickReviewElapsedSeconds] = useState(0);
 	const [bookUtilityPanel, setBookUtilityPanel] = useState<"history" | "exports" | null>(null);
 	const [newProjectName, setNewProjectName] = useState("");
+	const [providerModelsLoading, setProviderModelsLoading] = useState(false);
+	const [providerModelSearch, setProviderModelSearch] = useState("");
+	const [loadedProviderModels, setLoadedProviderModels] = useState<{
+		key: string;
+		models: string[];
+	} | null>(null);
 	const [previousQuickReviewResult, setPreviousQuickReviewResult] =
 		useState<QuickReviewResult | null>(null);
 	const [quickReviewError, setQuickReviewError] = useState<string | null>(null);
@@ -368,8 +375,7 @@ export function useWorkspaceHandlers(activeView: WorkspaceView) {
 	const activeBookPollJobIdRef = useRef<string | null>(null);
 	const workspaceAssetsLoadedRef = useRef(false);
 
-	const PROVIDER_CONFIG_HISTORY_RETENTION_MS = 7 * 24 * 60 * 60 * 1000;
-	const PROVIDER_CONFIG_HISTORY_MAX_ENTRIES = 30;
+	const PROVIDER_CONFIG_HISTORY_MAX_ENTRIES = 10;
 
 	function resolveStoreValue<T>(value: T | ((current: T) => T), current: T): T {
 		return typeof value === "function" ? (value as (current: T) => T)(current) : value;
@@ -400,11 +406,7 @@ export function useWorkspaceHandlers(activeView: WorkspaceView) {
 		return history
 			.filter((entry) => {
 				const timestamp = Date.parse(entry.createdAt);
-				return (
-					Boolean(entry?.id) &&
-					Number.isFinite(timestamp) &&
-					timestamp >= Date.now() - PROVIDER_CONFIG_HISTORY_RETENTION_MS
-				);
+				return Boolean(entry?.id) && Number.isFinite(timestamp);
 			})
 			.sort((a, b) => new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime())
 			.slice(0, PROVIDER_CONFIG_HISTORY_MAX_ENTRIES);
@@ -426,25 +428,24 @@ export function useWorkspaceHandlers(activeView: WorkspaceView) {
 	) {
 		setProvider((current) => {
 			const nextValue = resolveStoreValue(nextProvider, current);
-			const normalized = normalizeProviderConfig(nextValue);
-			setProviderConfigHistory((history) => {
-				const normalizedHistory = pruneProviderConfigHistory(history);
-				const exists = normalizedHistory.some((entry) =>
-					areProviderFormsEqual(entry.provider, normalized),
-				);
-				if (exists) {
-					return normalizedHistory;
-				}
+			return normalizeProviderConfig(nextValue);
+		});
+	}
 
-				const record: ProviderConfigHistoryEntry = {
-					id: createProviderHistoryId(),
-					createdAt: new Date().toISOString(),
-					title: providerHistoryLabel(normalized),
-					provider: normalized,
-				};
-				return pruneProviderConfigHistory([record, ...normalizedHistory]);
-			});
-			return normalized;
+	function rememberSuccessfulProviderConfig(providerConfig: ProviderForm) {
+		const normalized = normalizeProviderConfig(providerConfig);
+		const record: ProviderConfigHistoryEntry = {
+			id: createProviderHistoryId(),
+			createdAt: new Date().toISOString(),
+			title: providerHistoryLabel(normalized),
+			provider: normalized,
+		};
+
+		setProviderConfigHistory((history) => {
+			const withoutDuplicate = pruneProviderConfigHistory(history).filter(
+				(entry) => !areProviderFormsEqual(entry.provider, normalized),
+			);
+			return pruneProviderConfigHistory([record, ...withoutDuplicate]);
 		});
 	}
 
@@ -658,7 +659,26 @@ export function useWorkspaceHandlers(activeView: WorkspaceView) {
 		[provider],
 	);
 	const selectedProviderPreset = providerPresets[provider.preset];
-	const providerModelOptions = selectedProviderPreset.modelOptions ?? [];
+	const providerBaseUrlOptions = selectedProviderPreset.baseUrlOptions ?? [];
+	const selectedBaseUrlOption = providerBaseUrlOptions.some(
+		(option) => option.url === provider.baseUrl,
+	)
+		? provider.baseUrl
+		: "__custom__";
+	const providerModelSourceKey = [
+		provider.preset,
+		provider.kind,
+		provider.baseUrl,
+		provider.apiKey ? "with-key" : "no-key",
+	].join("|");
+	const remoteProviderModelOptions =
+		loadedProviderModels?.key === providerModelSourceKey ? loadedProviderModels.models : [];
+	const providerModelOptions = Array.from(
+		new Set([...remoteProviderModelOptions, ...(selectedProviderPreset.modelOptions ?? [])]),
+	);
+	const filteredProviderModelOptions = providerModelOptions.filter((model) =>
+		model.toLowerCase().includes(providerModelSearch.trim().toLowerCase()),
+	);
 	const selectedModelOption = providerModelOptions.includes(provider.model)
 		? provider.model
 		: "__custom__";
@@ -1007,6 +1027,7 @@ export function useWorkspaceHandlers(activeView: WorkspaceView) {
 					? "本地演示"
 					: provider.model || String(result.model || "未指定模型");
 			const duration = Date.now() - startedAt;
+			rememberSuccessfulProviderConfig(providerPayload);
 			setStatus(`模型服务可用：${providerName} · ${modelName}（${duration}ms）`);
 		} catch (error) {
 			const message = error instanceof Error ? error.message : "模型测试失败，请稍后重试。";
@@ -1018,6 +1039,8 @@ export function useWorkspaceHandlers(activeView: WorkspaceView) {
 
 	function applyProviderPreset(presetId: ProviderPresetId) {
 		const preset = providerPresets[presetId];
+		setProviderModelSearch("");
+		setLoadedProviderModels(null);
 		setProviderWithHistory((current) => ({
 			...current,
 			preset: presetId,
@@ -1027,6 +1050,50 @@ export function useWorkspaceHandlers(activeView: WorkspaceView) {
 			jsonMode: preset.jsonMode,
 			apiKey: preset.needsApiKey ? current.apiKey : "",
 		}));
+	}
+
+	async function loadProviderModelOptions() {
+		if (provider.kind === "mock") {
+			setStatus("本地演示不需要拉取模型列表。");
+			return;
+		}
+
+		if (!provider.baseUrl.trim()) {
+			setStatus("请先选择或填写 Base URL，再拉取模型列表。");
+			return;
+		}
+
+		if (selectedProviderPreset.needsApiKey && !provider.apiKey.trim()) {
+			setStatus("该模型服务需要先填写 API Key，才能拉取模型列表。");
+			return;
+		}
+
+		setProviderModelsLoading(true);
+		setStatus("正在从模型服务拉取模型列表...");
+		const requestKey = providerModelSourceKey;
+		try {
+			const result = await listProviderModels(providerPayload, 20000);
+			setLoadedProviderModels({
+				key: requestKey,
+				models: result.models,
+			});
+			if (!provider.model && result.models[0]) {
+				setProviderWithHistory((current) => ({
+					...current,
+					model: result.models[0] ?? current.model,
+				}));
+			}
+			setStatus(
+				result.models.length
+					? `已拉取 ${result.models.length} 个模型，可搜索后选择。`
+					: "模型服务没有返回模型列表；仍可手动填写 Model。",
+			);
+		} catch (error) {
+			const message = error instanceof Error ? error.message : "拉取模型列表失败。";
+			setStatus(`拉取模型列表失败：${message}`);
+		} finally {
+			setProviderModelsLoading(false);
+		}
 	}
 
 	function resetProviderSettings() {
@@ -1048,6 +1115,11 @@ export function useWorkspaceHandlers(activeView: WorkspaceView) {
 	function deleteProviderConfigHistory(historyId: string) {
 		setProviderConfigHistory((current) => current.filter((item) => item.id !== historyId));
 		setStatus("已删除该条 AI 设置记录。");
+	}
+
+	function clearProviderConfigHistory() {
+		setProviderConfigHistory([]);
+		setStatus("已清空 AI 设置历史。");
 	}
 
 	function useExampleChapter(exampleId?: string) {
@@ -2013,9 +2085,16 @@ export function useWorkspaceHandlers(activeView: WorkspaceView) {
 		providerConfigHistory,
 		applyProviderConfigHistory,
 		deleteProviderConfigHistory,
+		clearProviderConfigHistory,
 		providerPayload,
 		selectedProviderPreset,
+		providerBaseUrlOptions,
+		selectedBaseUrlOption,
 		providerModelOptions,
+		filteredProviderModelOptions,
+		providerModelSearch,
+		setProviderModelSearch,
+		providerModelsLoading,
 		selectedModelOption,
 		isBackendFreeProvider,
 		providerLabel,
@@ -2136,6 +2215,7 @@ export function useWorkspaceHandlers(activeView: WorkspaceView) {
 		saveRevisionNote,
 		exportProjectMarkdown,
 		testProvider,
+		loadProviderModelOptions,
 		applyProviderPreset,
 		resetProviderSettings,
 		useExampleChapter,
